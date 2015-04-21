@@ -1,2 +1,0 @@
-/Users/jean/Code/gaga/build/gaga/CMakeFiles/gaga.dir
-/Users/jean/Code/gaga/build/examples/biggest_int/CMakeFiles/biggestInt.dir

@@ -1,2 +1,0 @@
-/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/ar cq libgaga.a  CMakeFiles/gaga.dir/tools.cpp.o CMakeFiles/gaga.dir/jsonxx/jsonxx.cc.o CMakeFiles/gaga.dir/jsonxx/jsonxx_test.cc.o
-/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/ranlib libgaga.a
