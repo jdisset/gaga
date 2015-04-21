@@ -1,0 +1,1 @@
+g++-4.9   -std=c++11 -O3 -Wall -Wextra -pedantic -Wno-dollar-in-identifier-extension -fopenmp -Wl,-search_paths_first -Wl,-headerpad_max_install_names  CMakeFiles/biggestInt.dir/main.cpp.o  -o biggestInt  ../../gaga/libgaga.a /usr/local/Cellar/open-mpi/1.8.4/lib/libmpi_cxx.dylib /usr/local/Cellar/open-mpi/1.8.4/lib/libmpi.dylib 
