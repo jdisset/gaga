@@ -248,6 +248,8 @@ template <typename DNA, typename Evaluator> class GA {
 			}
 
 #ifdef OMP
+			omp_lock_t statsLock;
+			omp_init_lock(&statsLock);
 #pragma omp parallel for schedule(dynamic, 1)
 #endif
 			for (size_t i = 0; i < population.size(); ++i) {
@@ -264,11 +266,18 @@ template <typename DNA, typename Evaluator> class GA {
 						milliseconds totalTime = std::chrono::duration_cast<milliseconds>(t1 - t0);
 						ostringstream indStatus;
 						unordered_set<string> best;
+#ifdef OMP
+						omp_set_lock(&statsLock);
+#endif
 						for (auto& o : population[i].fitnesses) {
 							if (stats.count(o.first) == 0) {
 								stats[o.first] = make_pair(0.0, 0.0);
 							}
-							stats.at(o.first).second += o.second;
+							try {
+								stats.at(o.first).second += o.second;
+							} catch (const out_of_range& e) {
+								cerr << "Error : " << e.what() << " ; " << o.first << " is out of stats range" << endl;
+							}
 							if (o.second > stats.at(o.first).first) {  // new best
 								best.insert(o.first);
 								stats.at(o.first).first = o.second;
@@ -296,6 +305,9 @@ template <typename DNA, typename Evaluator> class GA {
 						if (verbosity >= 2) {
 							cout << indStatus.str();
 						}
+#ifdef OMP
+						omp_unset_lock(&statsLock);
+#endif
 					}
 				}
 			}
