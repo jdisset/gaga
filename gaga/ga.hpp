@@ -573,14 +573,20 @@ template <typename DNA, typename Evaluator> class GA {
 					// we push the first inds without looking at their fitness
 					elites.at(o).push_back(i);
 				} else {
+					// but if we already have enough elites we need to check if the one we have
+					// really are the best (and replace them if they're not)
+					auto worst = elites.at(o).begin();
+					auto worstScore = worst->fitnesses.at(o);
+					// first we find the worst individual we have saved until now
 					for (auto j = elites.at(o).begin(); j != elites.at(o).end(); ++j) {
-						// but if we already have enough elites we need to check if the one we have
-						// really are the best (and replace them if they're not)
-						if (j->fitnesses.at(o) < i.fitnesses.at(o)) {
-							elites.at(o).erase(j);
-							elites.at(o).push_back(i);
-							break;
+						if (worstScore > j->fitnesses.at(o)) {
+							worstScore = j->fitnesses.at(o);
+							worst = j;
 						}
+					}
+					// then we replace it if our candidate is better
+					if (worstScore < i.fitnesses.at(o)) {
+						*worst = i;
 					}
 				}
 			}
