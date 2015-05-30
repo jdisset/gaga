@@ -30,7 +30,7 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 
-#define OMP
+//#define OMP
 #ifdef OMP
 #include <omp.h>
 #endif
@@ -56,6 +56,10 @@ namespace GAGA {
 // reset()
 // jsonxx:Object& constructor
 // toJson()
+//
+// Evaluaor class must have
+// operator()(const Individual<DNA>& ind)
+// const name
 
 template <typename DNA, typename Evaluator> class GA {
 	/*********************************************************************************
@@ -66,31 +70,50 @@ template <typename DNA, typename Evaluator> class GA {
 	unsigned int popSize = 500;      // nb of individuals in the population
 	unsigned int nbElites = 1;       // nb of elites to keep accross generations
 	unsigned int nbSavedElites = 1;  // nb of elites to save
-	unsigned int tournamentSize = 3;     // nb of competitors in tournament
-	unsigned int nbGen = 500;            // nb of generations
-	unsigned int maxArchiveSize = 2000;  // nb of footprints to keep for novelty computations
-	unsigned int KNN = 15;               // size of the neighbourhood for novelty
-	string folder = "../evos/";          // where to save the results
-	double crossoverProba = 0.3;         // crossover probability
-	double mutationProba = 0.5;          // mutation probablility
-	map<string, double> proportions;     // {{"baseObj", 0.25}, {"novelty", 0.75}};  // fitness weight
-	// proportions contains the relative weights of the objectives
-	// if an objective is not present here but still used at evaluation
-	// a default non weighted average will be used
-	/********************************************************************************/
+	unsigned int tournamentSize = 3; // nb of competitors in tournament
+	unsigned int nbGen = 500;        // nb of generations
+	unsigned int maxArchiveSize = 2000; // nb of footprints to keep for novelty computations
+	unsigned int KNN = 15;              // size of the neighbourhood for novelty
+	string folder = "../evos/";         // where to save the results
+	double crossoverProba = 0.3;        // crossover probability
+	double mutationProba = 0.5;         // mutation probablility
+	map<string, double> proportions;    // {{"baseObj", 0.25}, {"novelty", 0.75}};  // fitness weight
+	                                    // proportions contains the relative weights of the objectives
+	                                    // if an objective is not present here but still used at evaluation
+	                                    // a default non weighted average will be used
+	/********************************************************************************
+	 *                                 SETTERS
+	 ********************************************************************************/
+	void enableNovelty() { novelty = true; }
+	void disableNovelty() { novelty = false; }
+	void setVerbosity(unsigned int lvl) { verbosity = lvl <= 3 ? (lvl >= 0 ? lvl : 0) : 3; }
+	void setPopSize(unsigned int s) { popSize = s; }
+	void setNbElites(unsigned int n) { nbElites = n; }
+	void setNbSavedElites(unsigned int n) { nbSavedElites = n; }
+	void setTournamentSize(unsigned int n) { tournamentSize = n; }
+	void setNbGenerations(unsigned int n) { nbGen = n; }
+	void setMaxArchiveSize(unsigned int n) { maxArchiveSize = n; }
+	void setKNN(unsigned int n) { KNN = n; }
+	void setSaveFolder(string s) { folder = s; }
+	void setCrossoverProba(double p) { crossoverProba = p <= 1.0 ? (p >= 0.0 ? p : 0.0) : 1.0; }
+	void setMutationProba(double p) { mutationProba = p <= 1.0 ? (p >= 0.0 ? p : 0.0) : 1.0; }
+	void setObjectivesDistribution(map<string, double> d) { proportions = d; }
+	void setObjectivesDistribution(string o, double d) { proportions[o] = d; }
+
+	////////////////////////////////////////////////////////////////////////////////////
 
 	Evaluator ev;
-	archType archive;  // where for novelty
+	archType archive; // where for novelty
 	vector<Individual<DNA>> population;
 	unsigned int currentGeneration = 0;
 	// openmp/mpi stuff
 	unsigned int procId = 0;
 	unsigned int nbProcs = 1;
 	int argc = 1;
-	char** argv = nullptr;
+	char **argv = nullptr;
 
-	map<string, pair<double, double>> stats;      // fitnesses stats. First = best, second = avg
-	map<string, pair<double, double>> prevStats;  // fitnesses stats. First = best, second = avg
+	map<string, pair<double, double>> stats;     // fitnesses stats. First = best, second = avg
+	map<string, pair<double, double>> prevStats; // fitnesses stats. First = best, second = avg
 
 	/*********************************************************************************
 	 *                          NOVELTY RELATED METHODS
@@ -103,7 +126,7 @@ template <typename DNA, typename Evaluator> class GA {
 	// taken at different points in the simulation. Snapshot must be of same size accross individuals
 	// footprint must be set in the evaluator (see examples)
 
-	static double getFootprintDistance(const vector<vector<double>>& f0, const vector<vector<double>>& f1) {
+	static double getFootprintDistance(const vector<vector<double>> &f0, const vector<vector<double>> &f1) {
 		assert(f0.size() == f1.size());
 		double d = 0;
 		for (unsigned int i = 0; i < f0.size(); ++i) {
@@ -118,7 +141,7 @@ template <typename DNA, typename Evaluator> class GA {
 	// computeAvgDist (novelty related)
 	// returns the average distance of a foot print fp to its k nearest neighbours
 	// in a collection of footprints arch
-	static double computeAvgDist(unsigned int k, const archType& arch, const fpType& fp) {
+	static double computeAvgDist(unsigned int k, const archType &arch, const fpType &fp) {
 		archType knn;
 		double avgDist = 0;
 		if (arch.size() > k) {
@@ -136,7 +159,7 @@ template <typename DNA, typename Evaluator> class GA {
 				}
 			}
 			double divisor = 0;
-			for (auto& i : knn) {
+			for (auto &i : knn) {
 				double tmpD = GA<DNA, Evaluator>::getFootprintDistance(fp, i.first);
 				double divCoef = exp(-2.0 * tmpD) * i.second;
 				avgDist += tmpD * divCoef;
@@ -144,7 +167,7 @@ template <typename DNA, typename Evaluator> class GA {
 				// avoid stagnation
 				if (tmpD == 0.0 && i.second >= (double)k) return 0.0;
 			}
-			if (divisor == 0.0) {  // if this happens there's probably a bug somewhere
+			if (divisor == 0.0) { // if this happens there's probably a bug somewhere
 				avgDist = 0;
 			} else {
 				avgDist /= divisor;
@@ -152,16 +175,16 @@ template <typename DNA, typename Evaluator> class GA {
 		}
 		return avgDist;
 	}
-	void computeIndNovelty(Individual<DNA>& i) {
+	void computeIndNovelty(Individual<DNA> &i) {
 		i.fitnesses["novelty"] = GA<DNA, Evaluator>::computeAvgDist(KNN, archive, i.footprint);
 	}
 
 	// panpan cucul
-	static string footprintToString(const vector<vector<double>>& f) {
+	static string footprintToString(const vector<vector<double>> &f) {
 		ostringstream res;
-		for (auto& p : f) {
+		for (auto &p : f) {
 			res << NORMAL << "     [" << GREY;
-			for (const double& v : p) {
+			for (const double &v : p) {
 				res << " " << setw(4) << setprecision(3) << fixed << v;
 			}
 			res << NORMAL << " ]" << endl;
@@ -169,11 +192,11 @@ template <typename DNA, typename Evaluator> class GA {
 		return res.str();
 	}
 
- public:
+public:
 	/*********************************************************************************
 	 *                              CONSTRUCTOR
 	 ********************************************************************************/
-	GA(int ac, char** av) : argc(ac), argv(av) {
+	GA(int ac, char **av) : argc(ac), argv(av) {
 #ifdef CLUSTER
 		MPI_Init(&argc, &argv);
 		MPI_Comm_size(MPI_COMM_WORLD, &nbProcs);
@@ -225,9 +248,9 @@ template <typename DNA, typename Evaluator> class GA {
 				// we're in a slave process, we welcome our local population !
 				int strLength;
 				MPI_Status status;
-				MPI_Probe(0, 0, MPI_COMM_WORLD, &status);  // we want to know its size
+				MPI_Probe(0, 0, MPI_COMM_WORLD, &status); // we want to know its size
 				MPI_Get_count(&status, MPI_CHAR, &strLength);
-				char* popChar = new char[strLength + 1];
+				char *popChar = new char[strLength + 1];
 				MPI_Recv(popChar, strLength, MPI_BYTE, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 				// and we dejsonize !
 				jsonxx::Object o;
@@ -235,7 +258,7 @@ template <typename DNA, typename Evaluator> class GA {
 				if (!success) {
 					cerr << "parse failed. Str = " << popChar << endl;
 				}
-				population = Individual<DNA>::loadPopFromJSON(o);  // welcome bros!
+				population = Individual<DNA>::loadPopFromJSON(o); // welcome bros!
 				if (verbosity >= 3) {
 					cerr << endl
 					     << "Proc " << procId << " : reception of " << population.size() << " new individuals !"
@@ -269,16 +292,16 @@ template <typename DNA, typename Evaluator> class GA {
 #ifdef OMP
 						omp_set_lock(&statsLock);
 #endif
-						for (auto& o : population[i].fitnesses) {
+						for (auto &o : population[i].fitnesses) {
 							if (stats.count(o.first) == 0) {
 								stats[o.first] = make_pair(0.0, 0.0);
 							}
 							try {
 								stats.at(o.first).second += o.second;
-							} catch (const out_of_range& e) {
+							} catch (const out_of_range &e) {
 								cerr << "Error : " << e.what() << " ; " << o.first << " is out of stats range" << endl;
 							}
-							if (o.second > stats.at(o.first).first) {  // new best
+							if (o.second > stats.at(o.first).first) { // new best
 								best.insert(o.first);
 								stats.at(o.first).first = o.second;
 							}
@@ -287,7 +310,7 @@ template <typename DNA, typename Evaluator> class GA {
 						          << " Proc " << PURPLE << procId << NORMAL << " : Ind " << YELLOW << setw(3) << i
 						          << NORMAL << " evaluated in " GREEN << setw(3) << setprecision(1) << fixed
 						          << totalTime.count() / 1000.0f << NORMAL << "s :";
-						for (auto& o : population[i].fitnesses) {
+						for (auto &o : population[i].fitnesses) {
 							indStatus << " " << o.first << " : ";
 							if (best.count(o.first)) {
 								indStatus << CYANBOLD;
@@ -312,7 +335,7 @@ template <typename DNA, typename Evaluator> class GA {
 				}
 			}
 #ifdef CLUSTER
-			if (procId != 0) {  // if slave process we send our population to our mighty leader
+			if (procId != 0) { // if slave process we send our population to our mighty leader
 				ostringstream batchOSS;
 				batchOSS << Individual<DNA>::popToJSON(population);
 				string batchStr = batchOSS.str();
@@ -322,9 +345,9 @@ template <typename DNA, typename Evaluator> class GA {
 				for (unsigned int source = 1; source < (unsigned int)nbProcs; ++source) {
 					int strLength;
 					MPI_Status status;
-					MPI_Probe(source, 0, MPI_COMM_WORLD, &status);  // determining batch size
+					MPI_Probe(source, 0, MPI_COMM_WORLD, &status); // determining batch size
 					MPI_Get_count(&status, MPI_CHAR, &strLength);
-					char* popChar = new char[strLength + 1];
+					char *popChar = new char[strLength + 1];
 					MPI_Recv(popChar, strLength + 1, MPI_BYTE, source, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 					// and we dejsonize!
 					jsonxx::Object o;
@@ -342,7 +365,7 @@ template <typename DNA, typename Evaluator> class GA {
 				}
 				// now we update novelty
 				if (novelty) {
-					for (auto& ind : population) {
+					for (auto &ind : population) {
 						nbEval++;
 						double avgD = GA<DNA, Evaluator>::computeAvgDist(KNN, archive, ind.footprint);
 						ind.fitnesses["novelty"] = avgD;
@@ -350,7 +373,7 @@ template <typename DNA, typename Evaluator> class GA {
 							stats["novelty"] = make_pair(0.0, 0.0);
 						}
 						stats.at("novelty").second += ind.fitnesses.at("novelty");
-						if (avgD > stats.at("novelty").first) {  // new best
+						if (avgD > stats.at("novelty").first) { // new best
 							stats.at("novelty").first = avgD;
 							if (verbosity >= 2) {
 								cerr << " New best novelty: " << CYAN << avgD << NORMAL << endl;
@@ -370,7 +393,7 @@ template <typename DNA, typename Evaluator> class GA {
 					cout << GREENBOLD << "     generation " << currentGeneration << NORMAL << " done" << endl;
 					cout << "     " << GREEN << nbEval << NORMAL << " evaluations in " << (totalTime.count() / 1000.0f)
 					     << "s." << endl;
-					for (auto& o : stats) {
+					for (auto &o : stats) {
 						cout << "     " << o.first << " : best = " << CYAN << o.second.first
 						     << NORMAL " ; avg = " << PURPLE << o.second.second / nbEval << NORMAL << endl;
 						o.second.second = 0;
@@ -418,7 +441,7 @@ template <typename DNA, typename Evaluator> class GA {
 		if (novelty) {
 			// first we archive the footprints
 			archive.reserve(population.size());
-			for (auto& i : population) {
+			for (auto &i : population) {
 				archive.push_back(make_pair(i.footprint, 1));
 			}
 			vector<vector<double>> distanceMatrix;
@@ -472,7 +495,7 @@ template <typename DNA, typename Evaluator> class GA {
 				archive.erase(archive.begin() + closestId1);
 				// update distanceMatrix
 				distanceMatrix.erase(distanceMatrix.begin() + closestId1);
-				for (auto& dm : distanceMatrix) {
+				for (auto &dm : distanceMatrix) {
 					dm.erase(dm.begin() + closestId1);
 				}
 				for (unsigned int i = 0; i < (unsigned int)closestId0; ++i) {
@@ -491,13 +514,13 @@ template <typename DNA, typename Evaluator> class GA {
 		// then we copy the elite
 		vector<Individual<DNA>> nextGen;
 		vector<string> objectives;
-		for (auto& o : population[0].fitnesses) {
-			objectives.push_back(o.first);  // we need to know what the objectives are
+		for (auto &o : population[0].fitnesses) {
+			objectives.push_back(o.first); // we need to know what the objectives are
 		}
 		map<string, vector<Individual<DNA>>> elites = getElites(objectives, nbElites);
 		// we put the elites in the nextGen
-		for (auto& e : elites) {
-			for (auto& i : e.second) {
+		for (auto &e : elites) {
+			for (auto &i : e.second) {
 				nextGen.push_back(i);
 			}
 		}
@@ -512,9 +535,9 @@ template <typename DNA, typename Evaluator> class GA {
 		}
 		// we need to know how much of each objective's representatives we will have
 		// if the proportion map has been set, we use it. Else we split equally
-		map<string, double> objPop;  // nb of ind per objective
-		double sum = 0;              // we need to be sure these proportions are normalized
-		for (auto& o : objectives) {
+		map<string, double> objPop; // nb of ind per objective
+		double sum = 0;             // we need to be sure these proportions are normalized
+		for (auto &o : objectives) {
 			if (proportions.count(o) > 0) {
 				objPop[o] = proportions.at(o);
 			} else {
@@ -525,17 +548,17 @@ template <typename DNA, typename Evaluator> class GA {
 		int availableSpots = population.size() - nextGen.size();
 		int cpt = 0;
 		int id = 0;
-		for (auto& o : objPop) {
-			o.second /= sum;  // normalization
+		for (auto &o : objPop) {
+			o.second /= sum; // normalization
 			if (id++ < (int)objPop.size() - 1) {
 				o.second = static_cast<int>(o.second * static_cast<double>(availableSpots));
 				cpt += o.second;
-			} else {  // if it's the last obj, we complete
+			} else { // if it's the last obj, we complete
 				o.second = availableSpots - cpt;
 			}
 		}
 
-		for (auto& o : objPop) {
+		for (auto &o : objPop) {
 			unsigned int popGoal = nextGen.size() + static_cast<unsigned int>(o.second);
 			while (nextGen.size() < popGoal) {
 				vector<Individual<DNA>> tournament;
@@ -550,7 +573,7 @@ template <typename DNA, typename Evaluator> class GA {
 						winner = tournament[i];
 					}
 				}
-				if (d(globalRand) < mutationProba) {  // mutation
+				if (d(globalRand) < mutationProba) { // mutation
 					winner.dna.mutate();
 				}
 				nextGen.push_back(winner);
@@ -561,26 +584,27 @@ template <typename DNA, typename Evaluator> class GA {
 		}
 		population.clear();
 
+		// uniform_int_distribution<int> dint2(firstNonEliteIndex, nextGen.size() - 1);
 		for (unsigned int pi = 0; pi < nextGen.size(); ++pi) {
-			auto& p1 = nextGen[pi];
+			auto &p1 = nextGen[pi];
 			if (pi >= firstNonEliteIndex && d(globalRand) < crossoverProba) {
 				unsigned int r = dint(globalRand);
-				Individual<DNA>& p2 = nextGen[r];
+				Individual<DNA> &p2 = nextGen[r];
 				population.push_back(Individual<DNA>(p1.dna.crossover(p2.dna)));
 			} else
 				population.push_back(p1);
 		}
 	}
 
-	map<string, vector<Individual<DNA>>> getElites(const vector<string>& obj, int n) {
+	map<string, vector<Individual<DNA>>> getElites(const vector<string> &obj, int n) {
 		assert(obj.size() > 0);
 		if (verbosity >= 3) {
 			cerr << "getElites : nbObj = " << obj.size() << " n = " << n << endl;
 		}
 		map<string, vector<Individual<DNA>>> elites;
-		for (auto& o : obj) {
+		for (auto &o : obj) {
 			elites[o] = vector<Individual<DNA>>();
-			for (auto& i : population) {
+			for (auto &i : population) {
 				if ((int)elites.at(o).size() < n) {
 					// we push the first inds without looking at their fitness
 					elites.at(o).push_back(i);
@@ -612,8 +636,8 @@ template <typename DNA, typename Evaluator> class GA {
 	void saveBests(int n) {
 		// save n bests dnas for all objectives
 		vector<string> objectives;
-		for (auto& o : population[0].fitnesses) {
-			objectives.push_back(o.first);  // we need to know what are the objective functions
+		for (auto &o : population[0].fitnesses) {
+			objectives.push_back(o.first); // we need to know what are the objective functions
 		}
 		map<string, vector<Individual<DNA>>> elites = getElites(objectives, n);
 		stringstream baseName;
@@ -622,9 +646,9 @@ template <typename DNA, typename Evaluator> class GA {
 		if (verbosity >= 3) {
 			cerr << "created directory " << baseName.str() << endl;
 		}
-		for (auto& e : elites) {
+		for (auto &e : elites) {
 			int id = 0;
-			for (auto& i : e.second) {
+			for (auto &i : e.second) {
 				stringstream fileName;
 				fileName << baseName.str() << "/" << e.first << "_" << i.fitnesses.at(e.first) << "_" << id++
 				         << ".dna";
@@ -677,7 +701,7 @@ template <typename DNA, typename Evaluator> class GA {
 		mkdir(baseFolder.c_str(), 0777);
 		auto now = system_clock::now();
 		time_t now_c = system_clock::to_time_t(now);
-		struct tm* parts = localtime(&now_c);
+		struct tm *parts = localtime(&now_c);
 
 		stringstream fname;
 		fname << ev.name << parts->tm_mday << "_" << parts->tm_mon + 1 << "_";
