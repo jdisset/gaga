@@ -62,6 +62,7 @@ namespace GAGA {
 // const name
 
 template <typename DNA, typename Evaluator> class GA {
+protected:
 	/*********************************************************************************
 	 *                            MAIN GA SETTINGS
 	 ********************************************************************************/
@@ -74,6 +75,7 @@ template <typename DNA, typename Evaluator> class GA {
 	unsigned int nbGen = 500;        // nb of generations
 	unsigned int maxArchiveSize = 2000; // nb of footprints to keep for novelty computations
 	unsigned int KNN = 15;              // size of the neighbourhood for novelty
+	unsigned int saveInterval = 1;      // interval between 2 whole population saves
 	string folder = "../evos/";         // where to save the results
 	double crossoverProba = 0.3;        // crossover probability
 	double mutationProba = 0.5;         // mutation probablility
@@ -84,6 +86,7 @@ template <typename DNA, typename Evaluator> class GA {
 	/********************************************************************************
 	 *                                 SETTERS
 	 ********************************************************************************/
+public:
 	void enableNovelty() { novelty = true; }
 	void disableNovelty() { novelty = false; }
 	void setVerbosity(unsigned int lvl) { verbosity = lvl <= 3 ? (lvl >= 0 ? lvl : 0) : 3; }
@@ -94,6 +97,7 @@ template <typename DNA, typename Evaluator> class GA {
 	void setNbGenerations(unsigned int n) { nbGen = n; }
 	void setMaxArchiveSize(unsigned int n) { maxArchiveSize = n; }
 	void setKNN(unsigned int n) { KNN = n; }
+	void setPopSaveInterval(unsigned int n) { saveInterval = n; }
 	void setSaveFolder(string s) { folder = s; }
 	void setCrossoverProba(double p) { crossoverProba = p <= 1.0 ? (p >= 0.0 ? p : 0.0) : 1.0; }
 	void setMutationProba(double p) { mutationProba = p <= 1.0 ? (p >= 0.0 ? p : 0.0) : 1.0; }
@@ -102,6 +106,7 @@ template <typename DNA, typename Evaluator> class GA {
 
 	////////////////////////////////////////////////////////////////////////////////////
 
+protected:
 	Evaluator ev;
 	archType archive; // where for novelty
 	vector<Individual<DNA>> population;
@@ -202,15 +207,13 @@ public:
 		MPI_Comm_size(MPI_COMM_WORLD, &nbProcs);
 		MPI_Comm_rank(MPI_COMM_WORLD, &procId);
 		if (procId == 0) {
-			cerr << "   -------------------" << endl;
-			cerr << CYAN << " MPI STARTED WITH " << NORMAL << nbProcs << CYAN << " PROCS " << NORMAL << endl;
-			cerr << "   -------------------" << endl;
-			cerr << "Initialising population in master process" << endl;
-#endif
-			for (unsigned int i = 0; i < popSize; ++i) {
-				population.push_back(Individual<DNA>(DNA::random()));
+			if (verbosity == 3) {
+				cerr << "   -------------------" << endl;
+				cerr << CYAN << " MPI STARTED WITH " << NORMAL << nbProcs << CYAN << " PROCS " << NORMAL << endl;
+				cerr << "   -------------------" << endl;
+				cerr << "Initialising population in master process" << endl;
 			}
-			createFolder(folder);
+#endif
 #ifdef CLUSTER
 		}
 #endif
@@ -221,6 +224,10 @@ public:
 	 ********************************************************************************/
 	// "Vroum vroum"
 	int start() {
+		for (unsigned int i = 0; i < popSize; ++i) {
+			population.push_back(Individual<DNA>(DNA::random()));
+		}
+		createFolder(folder);
 		bool finished = false;
 		if (verbosity >= 1) {
 			cout << GREEN << " Starting GA " << NORMAL << endl;
@@ -281,9 +288,15 @@ public:
 #ifndef CLUSTER
 					nbEval++;
 #endif
+					if (verbosity >= 3) {
+						cerr << "Starting evaluation of ind " << i << endl;
+					}
 					auto t0 = high_resolution_clock::now();
 					ev(population[i]);
 					auto t1 = high_resolution_clock::now();
+					if (verbosity >= 3) {
+						cerr << "Evaluation ended " << i << endl;
+					}
 					// STATS:
 					if (verbosity >= 1) {
 						milliseconds totalTime = std::chrono::duration_cast<milliseconds>(t1 - t0);
@@ -417,7 +430,7 @@ public:
 					cout << YELLOW << " --------------------------------------------------- " << NORMAL << endl << endl;
 				}
 				// we save everybody
-				savePop();
+				if (currentGeneration % saveInterval == 0) savePop();
 				saveBests(nbSavedElites);
 				// an prepare the next gen
 				prepareNextPop();
