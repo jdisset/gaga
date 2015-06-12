@@ -4,6 +4,5 @@ file(GLOB SRC
 	"*.cpp"
 	)
 add_executable(biggestInt ${SRC})
-target_link_libraries(biggestInt gaga)
 
 

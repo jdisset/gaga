@@ -17,49 +17,172 @@
 #ifndef GAMULTI_HPP
 #define GAMULTI_HPP
 
-#include "individual.hpp"
-#include "tools.h"
-#include "jsonxx/jsonxx.h"
+#include "json/json.hpp"
 #include <vector>
 #include <chrono>
 #include <fstream>
-#include <ctime>
 #include <unordered_set>
 #include <unordered_map>
 #include <deque>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <assert.h>
+#include <random>
 
-//#define OMP
+/****************************************
+ *       TO ENABLE PARALLELISATION
+ * *************************************/
+// before including this file,
+// #define OMP if you want OpenMP parallelisation
+// #define CLUSTER if you want MPI parralelisation
 #ifdef OMP
 #include <omp.h>
 #endif
-//#define CLUSTER
 #ifdef CLUSTER
 #include <mpi.h>
 #endif
 
+#define PURPLE "\033[1;35m"
+#define BLUE "\033[34m"
+#define GREY "\033[1;30m"
+#define YELLOW "\033[1;33m"
+#define RED "\033[1;31m"
+#define CYAN "\033[36m"
+#define CYANBOLD "\033[1;36m"
+#define GREEN "\033[32m"
+#define GREENBOLD "\033[1;32m"
+#define NORMAL "\033[0m"
+
+namespace GAGA {
+
+using namespace std;
+using fpType = std::vector<std::vector<double>>;         // footprints for novelty
+using archType = std::vector<std::pair<fpType, double>>; // collection of footprints
+using json = nlohmann::json;
 using std::chrono::high_resolution_clock;
 using std::chrono::milliseconds;
 using std::chrono::system_clock;
-using namespace std;
 
-namespace GAGA {
+/******************************************************************************************
+ *                                 GAGA LIBRARY
+ *****************************************************************************************/
+// This file contains :
+// 1 - the Individual class template : an individual's generic representation, with its dna, fitnesses and
+// behavior footprints (for novelty)
+// 2 - the main GA class template
+//
+// About parallelisation :
+// before including this file,
+// #define OMP if you want OpenMP parallelisation
+// #define CLUSTER if you want MPI parralelisation
+
+/*****************************************************************************
+ *                         INDIVIDUAL CLASS
+ * **************************************************************************/
+// A valid DNA class must have (see examples folder):
+// DNA mutate()
+// DNA crossover(DNA& other)
+// static DNA random(int argc, char** argv)
+// json& constructor
+// void reset()
+// json toJson()
+
+template <typename DNA> struct Individual {
+	DNA dna;
+	map<string, double> fitnesses; // map {"fitnessCriterName" -> "fitnessValue"}
+	fpType footprint;              // individual's footprint for novelty computation
+	bool evaluated = false;
+
+	Individual(const DNA &d) : dna(d) {}
+
+	Individual(const json &o) {
+		assert(o.count("dna"));
+		dna = DNA(o.at("dna"));
+		if (o.count("footprint")) {
+			json fp(o.at("footprint"));
+			for (auto &fCol : fp) {
+				vector<double> fc;
+				for (string f : fCol) {
+					double val;
+					sscanf(f.c_str(), "%lf", &val);
+					fc.push_back(val);
+				}
+				footprint.push_back(fp);
+			}
+		}
+		if (o.count("fitnesses")) {
+			json fitObj = o.at("fitnesses");
+			for (json::iterator it = fitObj.begin(); it != fitObj.end(); ++it) {
+				double val;
+				sscanf(it.value().get<string>().c_str(), "%lf", &val);
+				fitnesses[it.key()] = val;
+			}
+		}
+	}
+
+	// Exports individual to json
+	json toJSON() const {
+		json fitObject;
+		for (auto &f : fitnesses) {
+			char buf[50];
+			sprintf(buf, "%a", f.second);
+			fitObject[f.first] = buf;
+		}
+		json fpArr;
+		for (auto &f0 : footprint) {
+			vector<string> f(f0.size());
+			for (auto &f1 : f0) {
+				char buf[50];
+				sprintf(buf, "%a", f1);
+				f.push_back(buf);
+			}
+			fpArr.push_back(f);
+		}
+		json o;
+		o["dna"] = dna.toJSON();
+		o["fitnesses"] = fitObject;
+		o["footprint"] = fpArr;
+		return o;
+	}
+
+	// Exports a vector of individual to json
+	static json popToJSON(const vector<Individual<DNA>> &p) {
+		json o;
+		json popArray;
+		for (auto &i : p) {
+			popArray.push_back(i.toJSON());
+		}
+		o["population"] = popArray;
+		return o;
+	}
+
+	// Loads a vector of individual from json
+	static vector<Individual<DNA>> loadPopFromJSON(const json &o) {
+		assert(o.count("population"));
+		vector<Individual<DNA>> res;
+		json popArray = o.at("population");
+		for (auto &ind : popArray) {
+			res.push_back(Individual<DNA>(ind));
+		}
+		return res;
+	}
+};
 
 /*********************************************************************************
  *                                 GA CLASS
  ********************************************************************************/
-// DNA class must have :
-// mutate()
-// crossover(DNA& other)
-// random ()
-// reset()
-// jsonxx:Object& constructor
-// toJson()
+// DNA requirements : see Individual class;
 //
-// Evaluaor class must have
-// operator()(const Individual<DNA>& ind)
-// const name
+// Evaluaor class requirements (see examples folder):
+// constructor(int argc, char** argv)
+// void operator()(const Individual<DNA>& ind)
+// const string name
+//
+// TYPICAL USAGE :
+//
+// GA<DNAType, EvalType> ga;
+// ga.setPopSize(400);
+// return ga.start();
 
 template <typename DNA, typename Evaluator> class GA {
 protected:
@@ -67,7 +190,7 @@ protected:
 	 *                            MAIN GA SETTINGS
 	 ********************************************************************************/
 	bool novelty = false;            // is novelty enabled ?
-	unsigned int verbosity = 1;      // 0 = silent; 1 = generations stats; 2 = individuals stats; 3 = everything
+	unsigned int verbosity = 2;      // 0 = silent; 1 = generations stats; 2 = individuals stats; 3 = everything
 	unsigned int popSize = 500;      // nb of individuals in the population
 	unsigned int nbElites = 1;       // nb of elites to keep accross generations
 	unsigned int nbSavedElites = 1;  // nb of elites to save
@@ -107,8 +230,8 @@ public:
 	////////////////////////////////////////////////////////////////////////////////////
 
 protected:
-	Evaluator ev;
-	archType archive; // where for novelty
+	Evaluator evaluate;
+	archType archive; // where we store behaviors footprints for novelty
 	vector<Individual<DNA>> population;
 	unsigned int currentGeneration = 0;
 	// openmp/mpi stuff
@@ -117,91 +240,15 @@ protected:
 	int argc = 1;
 	char **argv = nullptr;
 
-	map<string, pair<double, double>> stats;     // fitnesses stats. First = best, second = avg
-	map<string, pair<double, double>> prevStats; // fitnesses stats. First = best, second = avg
-
-	/*********************************************************************************
-	 *                          NOVELTY RELATED METHODS
-	 ********************************************************************************/
-	// Notes about novelty
-	// novelty works with footprints. A footprint is just a vector of vector of doubles
-	// it is recommended that those doubles are within a same order of magnitude
-	// each vector of double is a "snapshot" : it represents the state of the evaluation of one individual
-	// at a certain time. Thus, a complete footprint is a combination (a vector) of one or more snapshot
-	// taken at different points in the simulation. Snapshot must be of same size accross individuals
-	// footprint must be set in the evaluator (see examples)
-
-	static double getFootprintDistance(const vector<vector<double>> &f0, const vector<vector<double>> &f1) {
-		assert(f0.size() == f1.size());
-		double d = 0;
-		for (unsigned int i = 0; i < f0.size(); ++i) {
-			assert(f0[i].size() == f1[i].size());
-			for (unsigned int j = 0; j < f0[i].size(); ++j) {
-				d += pow(f0[i][j] - f1[i][j], 2);
-			}
-		}
-		return d;
-	}
-
-	// computeAvgDist (novelty related)
-	// returns the average distance of a foot print fp to its k nearest neighbours
-	// in a collection of footprints arch
-	static double computeAvgDist(unsigned int k, const archType &arch, const fpType &fp) {
-		archType knn;
-		double avgDist = 0;
-		if (arch.size() > k) {
-			for (unsigned int i = 0; i < k; ++i) {
-				knn.push_back(arch[i]);
-			}
-			for (unsigned int i = k; i < arch.size(); ++i) {
-				double d0 = GA<DNA, Evaluator>::getFootprintDistance(fp, arch[i].first);
-				for (auto j = knn.begin(); j != knn.end(); ++j) {
-					if (d0 < GA<DNA, Evaluator>::getFootprintDistance(fp, (*j).first)) {
-						knn.erase(j);
-						knn.push_back(arch[i]);
-						break;
-					}
-				}
-			}
-			double divisor = 0;
-			for (auto &i : knn) {
-				double tmpD = GA<DNA, Evaluator>::getFootprintDistance(fp, i.first);
-				double divCoef = exp(-2.0 * tmpD) * i.second;
-				avgDist += tmpD * divCoef;
-				divisor += divCoef;
-				// avoid stagnation
-				if (tmpD == 0.0 && i.second >= (double)k) return 0.0;
-			}
-			if (divisor == 0.0) { // if this happens there's probably a bug somewhere
-				avgDist = 0;
-			} else {
-				avgDist /= divisor;
-			}
-		}
-		return avgDist;
-	}
-	void computeIndNovelty(Individual<DNA> &i) {
-		i.fitnesses["novelty"] = GA<DNA, Evaluator>::computeAvgDist(KNN, archive, i.footprint);
-	}
-
-	// panpan cucul
-	static string footprintToString(const vector<vector<double>> &f) {
-		ostringstream res;
-		for (auto &p : f) {
-			res << NORMAL << "     [" << GREY;
-			for (const double &v : p) {
-				res << " " << setw(4) << setprecision(3) << fixed << v;
-			}
-			res << NORMAL << " ]" << endl;
-		}
-		return res.str();
-	}
+	vector<map<string, map<string, double>>> stats; // fitnesses stats
+	std::default_random_engine globalRand =
+	    std::default_random_engine(std::chrono::system_clock::now().time_since_epoch().count());
 
 public:
 	/*********************************************************************************
 	 *                              CONSTRUCTOR
 	 ********************************************************************************/
-	GA(int ac, char **av) : argc(ac), argv(av) {
+	GA(int ac, char **av) : evaluate(ac, av), argc(ac), argv(av) {
 #ifdef CLUSTER
 		MPI_Init(&argc, &argv);
 		MPI_Comm_size(MPI_COMM_WORLD, &nbProcs);
@@ -225,7 +272,7 @@ public:
 	// "Vroum vroum"
 	int start() {
 		for (unsigned int i = 0; i < popSize; ++i) {
-			population.push_back(Individual<DNA>(DNA::random()));
+			population.push_back(Individual<DNA>(DNA::random(argc, argv)));
 		}
 		createFolder(folder);
 		bool finished = false;
@@ -260,11 +307,7 @@ public:
 				char *popChar = new char[strLength + 1];
 				MPI_Recv(popChar, strLength, MPI_BYTE, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 				// and we dejsonize !
-				jsonxx::Object o;
-				bool success = o.parse(popChar);
-				if (!success) {
-					cerr << "parse failed. Str = " << popChar << endl;
-				}
+				auto o = json::Parse(popChar);
 				population = Individual<DNA>::loadPopFromJSON(o); // welcome bros!
 				if (verbosity >= 3) {
 					cerr << endl
@@ -292,7 +335,7 @@ public:
 						cerr << "Starting evaluation of ind " << i << endl;
 					}
 					auto t0 = high_resolution_clock::now();
-					ev(population[i]);
+					evaluate(population[i]);
 					auto t1 = high_resolution_clock::now();
 					if (verbosity >= 3) {
 						cerr << "Evaluation ended " << i << endl;
@@ -305,18 +348,22 @@ public:
 #ifdef OMP
 						omp_set_lock(&statsLock);
 #endif
+						while (stats.size() <= currentGeneration) {
+							stats.push_back(map<string, map<string, double>>());
+						}
 						for (auto &o : population[i].fitnesses) {
-							if (stats.count(o.first) == 0) {
-								stats[o.first] = make_pair(0.0, 0.0);
+							if (!stats[currentGeneration].count(o.first)) {
+								stats[currentGeneration][o.first]["max"] = -1e30;
+								stats[currentGeneration][o.first]["min"] = 1e30;
+								stats[currentGeneration][o.first]["avg"] = 0;
 							}
-							try {
-								stats.at(o.first).second += o.second;
-							} catch (const out_of_range &e) {
-								cerr << "Error : " << e.what() << " ; " << o.first << " is out of stats range" << endl;
-							}
-							if (o.second > stats.at(o.first).first) { // new best
+							stats[currentGeneration][o.first]["avg"] += o.second;
+							if (o.second > stats[currentGeneration][o.first]["max"]) { // new best
 								best.insert(o.first);
-								stats.at(o.first).first = o.second;
+								stats[currentGeneration][o.first]["max"] = o.second;
+							}
+							if (o.second < stats[currentGeneration][o.first]["min"]) {
+								stats[currentGeneration][o.first]["min"] = o.second;
 							}
 						}
 						indStatus << endl
@@ -363,11 +410,7 @@ public:
 					char *popChar = new char[strLength + 1];
 					MPI_Recv(popChar, strLength + 1, MPI_BYTE, source, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 					// and we dejsonize!
-					jsonxx::Object o;
-					bool success = o.parse(popChar);
-					if (!success) {
-						cerr << endl << "parse failed. Str = " << popChar << endl;
-					}
+					auto o = json::parse(popChar);
 					vector<Individual<DNA>> batch = Individual<DNA>::loadPopFromJSON(o);
 					population.insert(population.end(), batch.begin(), batch.end());
 					if (verbosity >= 3) {
@@ -376,18 +419,22 @@ public:
 						     << " treated individuals from proc " << source << endl;
 					}
 				}
+#endif
+				// the end of a generation
 				// now we update novelty
 				if (novelty) {
 					for (auto &ind : population) {
 						nbEval++;
 						double avgD = GA<DNA, Evaluator>::computeAvgDist(KNN, archive, ind.footprint);
 						ind.fitnesses["novelty"] = avgD;
-						if (stats.count("novelty") == 0) {
-							stats["novelty"] = make_pair(0.0, 0.0);
+						if (stats[currentGeneration].count("novelty") == 0) {
+							stats[currentGeneration]["novelty"]["max"] = -1e30;
+							stats[currentGeneration]["novelty"]["min"] = 1e30;
+							stats[currentGeneration]["novelty"]["avg"] = 0;
 						}
-						stats.at("novelty").second += ind.fitnesses.at("novelty");
-						if (avgD > stats.at("novelty").first) { // new best
-							stats.at("novelty").first = avgD;
+						stats[currentGeneration]["novelty"]["avg"] += ind.fitnesses.at("novelty");
+						if (avgD > stats[currentGeneration]["novelty"]["max"]) { // new best
+							stats[currentGeneration]["novelty"]["max"] = avgD;     // new best
 							if (verbosity >= 2) {
 								cerr << " New best novelty: " << CYAN << avgD << NORMAL << endl;
 								cerr << footprintToString(ind.footprint);
@@ -395,44 +442,32 @@ public:
 						}
 					}
 				}
-#endif
-				// the end of a generation
 				auto tg1 = high_resolution_clock::now();
 				milliseconds totalTime = std::chrono::duration_cast<milliseconds>(tg1 - tg0);
+				for (auto &o : stats[currentGeneration]) {
+					o.second["avg"] /= nbEval;
+				}
 				if (verbosity >= 1) {
 					cout << endl;
 					cout << YELLOW << " --------------------------------------------------- " << NORMAL << endl;
 					cout << PURPLE << " --------------------------------------------------- " << NORMAL << endl;
 					cout << GREENBOLD << "     generation " << currentGeneration << NORMAL << " done" << endl;
-					cout << "     " << GREEN << nbEval << NORMAL << " evaluations in " << (totalTime.count() / 1000.0f)
+					cout << "     " << GREEN << nbEval << NORMAL << " evaluations in " << totalTime.count() / 1000.0
 					     << "s." << endl;
-					for (auto &o : stats) {
-						cout << "     " << o.first << " : best = " << CYAN << o.second.first
-						     << NORMAL " ; avg = " << PURPLE << o.second.second / nbEval << NORMAL << endl;
-						o.second.second = 0;
-						if (prevStats.count(o.first) == 0) {
-							prevStats[o.first] = make_pair(0.0, 0.0);
-						}
-						if (o.second.first < prevStats.at(o.first).first) {
-							cerr << RED << endl
-							     << endl
-							     << " xxxxxxxx--xxxxxxxxx--xxxxxxxxx ERREUR : prev best for " << o.first << " = "
-							     << prevStats.at(o.first).first << "; now = " << o.second.first << NORMAL << endl
-							     << endl
-							     << endl;
-						}
+					for (auto &o : stats[currentGeneration]) {
+						cout << "     " << o.first << " : best = " << CYAN << o.second["max"]
+						     << NORMAL " ; avg = " << PURPLE << o.second["avg"] << NORMAL << endl;
+						cout << PURPLE << " --------------------------------------------------- " << NORMAL << endl;
+						cout << YELLOW << " --------------------------------------------------- " << NORMAL << endl
+						     << endl;
 					}
-					prevStats = stats;
-					if (stats.count("novelty")) {
-						stats.at("novelty").first = 0;
-					}
-					cout << PURPLE << " --------------------------------------------------- " << NORMAL << endl;
-					cout << YELLOW << " --------------------------------------------------- " << NORMAL << endl << endl;
 				}
+				stats[currentGeneration]["global"]["time"] = totalTime.count() / 1000.0;
 				// we save everybody
 				if (currentGeneration % saveInterval == 0) savePop();
 				saveBests(nbSavedElites);
-				// an prepare the next gen
+				saveStats();
+				// and prepare the next gen
 				prepareNextPop();
 				finished = (currentGeneration++ >= nbGen);
 #ifdef CLUSTER
@@ -643,6 +678,83 @@ public:
 		return elites;
 	}
 
+protected:
+	/*********************************************************************************
+	 *                          NOVELTY RELATED METHODS
+	 ********************************************************************************/
+	// Notes about novelty
+	// novelty works with footprints. A footprint is just a vector of vector of doubles
+	// it is recommended that those doubles are within a same order of magnitude
+	// each vector of double is a "snapshot" : it represents the state of the evaluation of one individual
+	// at a certain time. Thus, a complete footprint is a combination (a vector) of one or more snapshot
+	// taken at different points in the simulation. Snapshot must be of same size accross individuals
+	// footprint must be set in the evaluator (see examples)
+
+	static double getFootprintDistance(const vector<vector<double>> &f0, const vector<vector<double>> &f1) {
+		assert(f0.size() == f1.size());
+		double d = 0;
+		for (unsigned int i = 0; i < f0.size(); ++i) {
+			assert(f0[i].size() == f1[i].size());
+			for (unsigned int j = 0; j < f0[i].size(); ++j) {
+				d += pow(f0[i][j] - f1[i][j], 2);
+			}
+		}
+		return d;
+	}
+
+	// computeAvgDist (novelty related)
+	// returns the average distance of a foot print fp to its k nearest neighbours
+	// in a collection of footprints arch
+	static double computeAvgDist(unsigned int k, const archType &arch, const fpType &fp) {
+		archType knn;
+		double avgDist = 0;
+		if (arch.size() > k) {
+			for (unsigned int i = 0; i < k; ++i) {
+				knn.push_back(arch[i]);
+			}
+			for (unsigned int i = k; i < arch.size(); ++i) {
+				double d0 = GA<DNA, Evaluator>::getFootprintDistance(fp, arch[i].first);
+				for (auto j = knn.begin(); j != knn.end(); ++j) {
+					if (d0 < GA<DNA, Evaluator>::getFootprintDistance(fp, (*j).first)) {
+						knn.erase(j);
+						knn.push_back(arch[i]);
+						break;
+					}
+				}
+			}
+			double divisor = 0;
+			for (auto &i : knn) {
+				double tmpD = GA<DNA, Evaluator>::getFootprintDistance(fp, i.first);
+				double divCoef = exp(-2.0 * tmpD) * i.second;
+				avgDist += tmpD * divCoef;
+				divisor += divCoef;
+				// avoid stagnation
+				if (tmpD == 0.0 && i.second >= (double)k) return 0.0;
+			}
+			if (divisor == 0.0) { // if this happens there's probably a bug somewhere
+				avgDist = 0;
+			} else {
+				avgDist /= divisor;
+			}
+		}
+		return avgDist;
+	}
+	void computeIndNovelty(Individual<DNA> &i) {
+		i.fitnesses["novelty"] = GA<DNA, Evaluator>::computeAvgDist(KNN, archive, i.footprint);
+	}
+
+	// panpan cucul
+	static string footprintToString(const vector<vector<double>> &f) {
+		ostringstream res;
+		for (auto &p : f) {
+			res << NORMAL << "     [" << GREY;
+			for (const double &v : p) {
+				res << " " << setw(4) << setprecision(3) << fixed << v;
+			}
+			res << NORMAL << " ]" << endl;
+		}
+		return res.str();
+	}
 	/*********************************************************************************
 	 *                         EAT / SAVE / RAVE / REPEAT
 	 ********************************************************************************/
@@ -669,44 +781,42 @@ public:
 				if (!fs) {
 					cerr << "Cannot open the output file." << endl;
 				}
-				fs << i.dna.toJSON().json();
+				fs << i.dna.toJSON().dump();
 				fs.close();
 			}
 		}
 	}
 
-	void loadPop(string file) {
-		ifstream t(file);
-		stringstream buffer;
-		buffer << t.rdbuf();
-		jsonxx::Object o;
-		o.parse(buffer.str());
-		if (o.has<jsonxx::Number>("generation")) {
-			currentGeneration = o.get<jsonxx::Number>("generation");
-		} else {
-			currentGeneration = 0;
-		}
-		jsonxx::Array popArray(o.get<jsonxx::Array>("population"));
-		population.clear();
-		for (size_t i = 0; i < popArray.size(); ++i) {
-			jsonxx::Object ind = popArray.get<jsonxx::Object>(i);
-			population.push_back(Individual<DNA>(DNA(ind.get<jsonxx::Object>("dna"))));
-		}
-	}
-
-	void savePop() {
-		jsonxx::Object o = Individual<DNA>::popToJSON(population);
-		o << "evaluator" << ev.name;
-		o << "generation" << currentGeneration;
-		stringstream baseName;
-		baseName << folder << "/gen" << currentGeneration;
-		mkdir(baseName.str().c_str(), 0777);
+	void saveStats() {
+		stringstream csv;
 		stringstream fileName;
-		fileName << baseName.str() << "/pop" << currentGeneration << ".pop";
-		ofstream file;
-		file.open(fileName.str());
-		file << o;
-		file.close();
+		fileName << folder << "/stats.csv";
+		csv << "generation";
+		if (stats.size() > 0) {
+			for (auto &cat : stats[0]) {
+				stringstream column;
+				column << cat.first << "_";
+				for (auto &s : cat.second) {
+					csv << "," << column.str() << s.first;
+				}
+			}
+			csv << endl;
+			for (size_t i = 0; i < stats.size(); ++i) {
+				csv << i;
+				for (auto &cat : stats[i]) {
+					for (auto &s : cat.second) {
+						csv << "," << s.second;
+					}
+				}
+				csv << endl;
+			}
+		}
+		ofstream fs(fileName.str());
+		if (!fs) {
+			cerr << "Cannot open the output file." << endl;
+		}
+		fs << csv.str();
+		fs.close();
 	}
 
 	void createFolder(string baseFolder) {
@@ -717,7 +827,7 @@ public:
 		struct tm *parts = localtime(&now_c);
 
 		stringstream fname;
-		fname << ev.name << parts->tm_mday << "_" << parts->tm_mon + 1 << "_";
+		fname << evaluate.name << parts->tm_mday << "_" << parts->tm_mon + 1 << "_";
 		int cpt = 0;
 		stringstream ftot;
 		do {
@@ -728,6 +838,39 @@ public:
 		} while (stat(ftot.str().c_str(), &sb) == 0 && S_ISDIR(sb.st_mode));
 		folder = ftot.str();
 		mkdir(folder.c_str(), 0777);
+	}
+
+public:
+	void loadPop(string file) {
+		ifstream t(file);
+		stringstream buffer;
+		buffer << t.rdbuf();
+		auto o = json::parse(buffer.str());
+		assert(o.count("population"));
+		if (o.count("generation")) {
+			currentGeneration = o.at("generation");
+		} else {
+			currentGeneration = 0;
+		}
+		population.clear();
+		for (auto ind : o.at("population")) {
+			population.push_back(Individual<DNA>(DNA(ind.at("dna"))));
+		}
+	}
+
+	void savePop() {
+		json o = Individual<DNA>::popToJSON(population);
+		o["evaluator"] = evaluate.name;
+		o["generation"] = currentGeneration;
+		stringstream baseName;
+		baseName << folder << "/gen" << currentGeneration;
+		mkdir(baseName.str().c_str(), 0777);
+		stringstream fileName;
+		fileName << baseName.str() << "/pop" << currentGeneration << ".pop";
+		ofstream file;
+		file.open(fileName.str());
+		file << o;
+		file.close();
 	}
 };
 }
