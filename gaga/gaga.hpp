@@ -518,7 +518,6 @@ public:
 					}
 				}
 			}
-			cerr << " actual merging..." << endl;
 			while (archive.size() > maxArchiveSize) {
 				// we merge the closest ones
 				int closestId0 = 0;
