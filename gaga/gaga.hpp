@@ -869,7 +869,7 @@ public:
 		fileName << baseName.str() << "/pop" << currentGeneration << ".pop";
 		ofstream file;
 		file.open(fileName.str());
-		file << o;
+		file << o.dump();
 		file.close();
 	}
 };
