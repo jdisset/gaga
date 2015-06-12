@@ -1,7 +1,20 @@
-#include "../../gaga/json/json.hpp"
-#include <random>
+// Gaga: lightweight simple genetic algorithm library
+// Copyright (c) Jean Disset 2015, All rights reserved.
 
-using namespace std;
+// This library is free software; you can redistribute it and/or
+// modify it under the terms of the GNU Lesser General Public
+// License as published by the Free Software Foundation; either
+// version 3.0 of the License, or (at your option) any later version.
+
+// This library is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+// Lesser General Public License for more details.
+
+// You should have received a copy of the GNU Lesser General Public
+// License along with this library.
+#include <random>
+#include "../../gaga/json/json.hpp"
 
 /***********************************
  *        A VERY BASIC DNA
@@ -10,7 +23,7 @@ class IntDNA {
 	using json = nlohmann::json;
 
 private:
-	uniform_int_distribution<int> distribution = uniform_int_distribution<int>(0, 1000000);
+	std::uniform_int_distribution<int> distribution = std::uniform_int_distribution<int>(0, 1000000);
 	int value1 = 0;
 	int value2 = 0;
 
@@ -22,14 +35,14 @@ public:
 	 *******************************************************/
 
 	// A valid dna must be able to be constructed from a json object
-	IntDNA(const json &o) {
+	explicit IntDNA(const json &o) {
 		value1 = o["value1"];
 		value2 = o["value2"];
 	}
 
 	// It must have a static "random" constructor which will be used to create the first generation
 	static IntDNA random(int, char **) {
-		uniform_int_distribution<int> dist = uniform_int_distribution<int>(0, 1000000);
+		std::uniform_int_distribution<int> dist = std::uniform_int_distribution<int>(0, 1000000);
 		return IntDNA(dist(globalRand), dist(globalRand));
 	}
 
@@ -41,7 +54,7 @@ public:
 
 	// A crossover method
 	IntDNA crossover(const IntDNA &other) {
-		uniform_int_distribution<int> dist = uniform_int_distribution<int>(0, 1);
+		std::uniform_int_distribution<int> dist = std::uniform_int_distribution<int>(0, 1);
 		int r = dist(globalRand);
 		if (r == 0) return IntDNA(other.value1, value2);
 		return IntDNA(value1, other.value2);

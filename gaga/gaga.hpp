@@ -17,17 +17,20 @@
 #ifndef GAMULTI_HPP
 #define GAMULTI_HPP
 
-#include "json/json.hpp"
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <assert.h>
 #include <vector>
 #include <chrono>
 #include <fstream>
 #include <unordered_set>
 #include <unordered_map>
 #include <deque>
-#include <sys/stat.h>
-#include <sys/types.h>
-#include <assert.h>
 #include <random>
+#include <utility>
+#include <map>
+#include <string>
+#include "json/json.hpp"
 
 /****************************************
  *       TO ENABLE PARALLELISATION
@@ -55,7 +58,15 @@
 
 namespace GAGA {
 
-using namespace std;
+using std::vector;
+using std::string;
+using std::set;
+using std::unordered_set;
+using std::map;
+using std::unordered_map;
+using std::cout;
+using std::cerr;
+using std::endl;
 using fpType = std::vector<std::vector<double>>;         // footprints for novelty
 using archType = std::vector<std::pair<fpType, double>>; // collection of footprints
 using json = nlohmann::json;
@@ -93,9 +104,9 @@ template <typename DNA> struct Individual {
 	fpType footprint;              // individual's footprint for novelty computation
 	bool evaluated = false;
 
-	Individual(const DNA &d) : dna(d) {}
+	explicit Individual(const DNA &d) : dna(d) {}
 
-	Individual(const json &o) {
+	explicit Individual(const json &o) {
 		assert(o.count("dna"));
 		dna = DNA(o.at("dna"));
 		if (o.count("footprint")) {
@@ -125,7 +136,7 @@ template <typename DNA> struct Individual {
 		json fitObject;
 		for (auto &f : fitnesses) {
 			char buf[50];
-			sprintf(buf, "%a", f.second);
+			snprintf(buf, sizeof(buf), "%a", f.second);
 			fitObject[f.first] = buf;
 		}
 		json fpArr;
@@ -133,7 +144,7 @@ template <typename DNA> struct Individual {
 			vector<string> f(f0.size());
 			for (auto &f1 : f0) {
 				char buf[50];
-				sprintf(buf, "%a", f1);
+				snprintf(buf, sizeof(buf), "%a", f1);
 				f.push_back(buf);
 			}
 			fpArr.push_back(f);
@@ -341,35 +352,35 @@ public:
 						cerr << "Evaluation ended " << i << endl;
 					}
 					// STATS:
-					if (verbosity >= 1) {
-						milliseconds totalTime = std::chrono::duration_cast<milliseconds>(t1 - t0);
-						ostringstream indStatus;
-						unordered_set<string> best;
+					milliseconds totalTime = std::chrono::duration_cast<milliseconds>(t1 - t0);
+					std::ostringstream indStatus;
+					unordered_set<string> best;
 #ifdef OMP
-						omp_set_lock(&statsLock);
+					omp_set_lock(&statsLock);
 #endif
-						while (stats.size() <= currentGeneration) {
-							stats.push_back(map<string, map<string, double>>());
+					while (stats.size() <= currentGeneration) {
+						stats.push_back(map<string, map<string, double>>());
+					}
+					for (auto &o : population[i].fitnesses) {
+						if (!stats[currentGeneration].count(o.first)) {
+							stats[currentGeneration][o.first]["max"] = -1e30;
+							stats[currentGeneration][o.first]["min"] = 1e30;
+							stats[currentGeneration][o.first]["avg"] = 0;
 						}
-						for (auto &o : population[i].fitnesses) {
-							if (!stats[currentGeneration].count(o.first)) {
-								stats[currentGeneration][o.first]["max"] = -1e30;
-								stats[currentGeneration][o.first]["min"] = 1e30;
-								stats[currentGeneration][o.first]["avg"] = 0;
-							}
-							stats[currentGeneration][o.first]["avg"] += o.second;
-							if (o.second > stats[currentGeneration][o.first]["max"]) { // new best
-								best.insert(o.first);
-								stats[currentGeneration][o.first]["max"] = o.second;
-							}
-							if (o.second < stats[currentGeneration][o.first]["min"]) {
-								stats[currentGeneration][o.first]["min"] = o.second;
-							}
+						stats[currentGeneration][o.first]["avg"] += o.second;
+						if (o.second > stats[currentGeneration][o.first]["max"]) { // new best
+							best.insert(o.first);
+							stats[currentGeneration][o.first]["max"] = o.second;
 						}
+						if (o.second < stats[currentGeneration][o.first]["min"]) {
+							stats[currentGeneration][o.first]["min"] = o.second;
+						}
+					}
+					if (verbosity >= 1) {
 						indStatus << endl
-						          << " Proc " << PURPLE << procId << NORMAL << " : Ind " << YELLOW << setw(3) << i
-						          << NORMAL << " evaluated in " GREEN << setw(3) << setprecision(1) << fixed
-						          << totalTime.count() / 1000.0f << NORMAL << "s :";
+						          << " Proc " << PURPLE << procId << NORMAL << " : Ind " << YELLOW << std::setw(3) << i
+						          << NORMAL << " evaluated in " GREEN << std::setw(3) << std::setprecision(1)
+						          << std::fixed << totalTime.count() / 1000.0f << NORMAL << "s :";
 						for (auto &o : population[i].fitnesses) {
 							indStatus << " " << o.first << " : ";
 							if (best.count(o.first)) {
@@ -385,13 +396,13 @@ public:
 							indStatus << GA<DNA, Evaluator>::footprintToString(population[i].footprint);
 							indStatus << endl;
 						}
-						if (verbosity >= 2) {
-							cout << indStatus.str();
-						}
-#ifdef OMP
-						omp_unset_lock(&statsLock);
-#endif
 					}
+					if (verbosity >= 2) {
+						cout << indStatus.str();
+					}
+#ifdef OMP
+					omp_unset_lock(&statsLock);
+#endif
 				}
 			}
 #ifdef CLUSTER
@@ -481,11 +492,11 @@ public:
 	}
 
 	/*********************************************************************************
-	 *                   NEXT POP GETTING READY FOR THE DANCEFLOOR
+	 *                            NEXT POP GETTING READY
 	 ********************************************************************************/
 	// Là où qu'on fait les bébés.
 	void prepareNextPop() {
-		uniform_real_distribution<double> d(0.0, 1.0);
+		std::uniform_real_distribution<double> d(0.0, 1.0);
 		if (novelty) {
 			// first we archive the footprints
 			archive.reserve(population.size());
@@ -507,6 +518,7 @@ public:
 					}
 				}
 			}
+			cerr << " actual merging..." << endl;
 			while (archive.size() > maxArchiveSize) {
 				// we merge the closest ones
 				int closestId0 = 0;
@@ -515,18 +527,19 @@ public:
 				    GA<DNA, Evaluator>::getFootprintDistance(archive[closestId0].first, archive[closestId1].first);
 				for (unsigned int id0 = 0; id0 < archive.size(); ++id0) {
 					for (unsigned int id1 = id0 + 1; id1 < archive.size(); ++id1) {
-						double dist = distanceMatrix[id0][id1];
+						const double &dist = distanceMatrix[id0][id1];
 						if (dist < closestDist) {
 							closestDist = dist;
 							closestId0 = id0;
 							closestId1 = id1;
-						} else if (dist == closestDist) {
-							if (d(globalRand) < 0.001) {
-								closestDist = dist;
-								closestId0 = id0;
-								closestId1 = id1;
-							}
 						}
+						// else if (dist == closestDist) {
+						// if (d(globalRand) < 0.001) {
+						// closestDist = dist;
+						// closestId0 = id0;
+						// closestId1 = id1;
+						//}
+						//}
 					}
 				}
 				vector<vector<double>> mean;
@@ -577,7 +590,7 @@ public:
 			cerr << "firstNonEliteIndex = " << firstNonEliteIndex << endl;
 		}
 		// now we can start the tournament
-		uniform_int_distribution<int> dint(0, population.size() - 1);
+		std::uniform_int_distribution<int> dint(0, population.size() - 1);
 		if (verbosity >= 3) {
 			cerr << " ... starting tournaments" << endl;
 		}
@@ -598,7 +611,7 @@ public:
 		int id = 0;
 		for (auto &o : objPop) {
 			o.second /= sum; // normalization
-			if (id++ < (int)objPop.size() - 1) {
+			if (id++ < static_cast<int>(objPop.size() - 1)) {
 				o.second = static_cast<int>(o.second * static_cast<double>(availableSpots));
 				cpt += o.second;
 			} else { // if it's the last obj, we complete
@@ -639,8 +652,9 @@ public:
 				unsigned int r = dint(globalRand);
 				Individual<DNA> &p2 = nextGen[r];
 				population.push_back(Individual<DNA>(p1.dna.crossover(p2.dna)));
-			} else
+			} else {
 				population.push_back(p1);
+			}
 		}
 	}
 
@@ -653,7 +667,7 @@ public:
 		for (auto &o : obj) {
 			elites[o] = vector<Individual<DNA>>();
 			for (auto &i : population) {
-				if ((int)elites.at(o).size() < n) {
+				if (static_cast<int>(elites.at(o).size()) < n) {
 					// we push the first inds without looking at their fitness
 					elites.at(o).push_back(i);
 				} else {
@@ -690,7 +704,7 @@ protected:
 	// taken at different points in the simulation. Snapshot must be of same size accross individuals
 	// footprint must be set in the evaluator (see examples)
 
-	static double getFootprintDistance(const vector<vector<double>> &f0, const vector<vector<double>> &f1) {
+	static double getFootprintDistance(const fpType &f0, const fpType &f1) {
 		assert(f0.size() == f1.size());
 		double d = 0;
 		for (unsigned int i = 0; i < f0.size(); ++i) {
@@ -729,7 +743,7 @@ protected:
 				avgDist += tmpD * divCoef;
 				divisor += divCoef;
 				// avoid stagnation
-				if (tmpD == 0.0 && i.second >= (double)k) return 0.0;
+				if (tmpD == 0.0 && i.second >= static_cast<double>(k)) return 0.0;
 			}
 			if (divisor == 0.0) { // if this happens there's probably a bug somewhere
 				avgDist = 0;
@@ -739,17 +753,18 @@ protected:
 		}
 		return avgDist;
 	}
-	void computeIndNovelty(Individual<DNA> &i) {
+
+	void computeIndNovelty(const Individual<DNA> &i) {
 		i.fitnesses["novelty"] = GA<DNA, Evaluator>::computeAvgDist(KNN, archive, i.footprint);
 	}
 
 	// panpan cucul
 	static string footprintToString(const vector<vector<double>> &f) {
-		ostringstream res;
+		std::ostringstream res;
 		for (auto &p : f) {
 			res << NORMAL << "     [" << GREY;
 			for (const double &v : p) {
-				res << " " << setw(4) << setprecision(3) << fixed << v;
+				res << " " << std::setw(4) << std::setprecision(3) << std::fixed << v;
 			}
 			res << NORMAL << " ]" << endl;
 		}
@@ -765,7 +780,7 @@ protected:
 			objectives.push_back(o.first); // we need to know what are the objective functions
 		}
 		map<string, vector<Individual<DNA>>> elites = getElites(objectives, n);
-		stringstream baseName;
+		std::stringstream baseName;
 		baseName << folder << "/gen" << currentGeneration;
 		mkdir(baseName.str().c_str(), 0777);
 		if (verbosity >= 3) {
@@ -774,10 +789,10 @@ protected:
 		for (auto &e : elites) {
 			int id = 0;
 			for (auto &i : e.second) {
-				stringstream fileName;
+				std::stringstream fileName;
 				fileName << baseName.str() << "/" << e.first << "_" << i.fitnesses.at(e.first) << "_" << id++
 				         << ".dna";
-				ofstream fs(fileName.str());
+				std::ofstream fs(fileName.str());
 				if (!fs) {
 					cerr << "Cannot open the output file." << endl;
 				}
@@ -788,13 +803,13 @@ protected:
 	}
 
 	void saveStats() {
-		stringstream csv;
-		stringstream fileName;
+		std::stringstream csv;
+		std::stringstream fileName;
 		fileName << folder << "/stats.csv";
 		csv << "generation";
 		if (stats.size() > 0) {
 			for (auto &cat : stats[0]) {
-				stringstream column;
+				std::stringstream column;
 				column << cat.first << "_";
 				for (auto &s : cat.second) {
 					csv << "," << column.str() << s.first;
@@ -811,7 +826,7 @@ protected:
 				csv << endl;
 			}
 		}
-		ofstream fs(fileName.str());
+		std::ofstream fs(fileName.str());
 		if (!fs) {
 			cerr << "Cannot open the output file." << endl;
 		}
@@ -826,10 +841,10 @@ protected:
 		time_t now_c = system_clock::to_time_t(now);
 		struct tm *parts = localtime(&now_c);
 
-		stringstream fname;
+		std::stringstream fname;
 		fname << evaluate.name << parts->tm_mday << "_" << parts->tm_mon + 1 << "_";
 		int cpt = 0;
-		stringstream ftot;
+		std::stringstream ftot;
 		do {
 			ftot.clear();
 			ftot.str("");
@@ -842,8 +857,8 @@ protected:
 
 public:
 	void loadPop(string file) {
-		ifstream t(file);
-		stringstream buffer;
+		std::ifstream t(file);
+		std::stringstream buffer;
 		buffer << t.rdbuf();
 		auto o = json::parse(buffer.str());
 		assert(o.count("population"));
@@ -862,16 +877,16 @@ public:
 		json o = Individual<DNA>::popToJSON(population);
 		o["evaluator"] = evaluate.name;
 		o["generation"] = currentGeneration;
-		stringstream baseName;
+		std::stringstream baseName;
 		baseName << folder << "/gen" << currentGeneration;
 		mkdir(baseName.str().c_str(), 0777);
-		stringstream fileName;
+		std::stringstream fileName;
 		fileName << baseName.str() << "/pop" << currentGeneration << ".pop";
-		ofstream file;
+		std::ofstream file;
 		file.open(fileName.str());
 		file << o.dump();
 		file.close();
 	}
 };
-}
+} // namespace GAGA
 #endif
