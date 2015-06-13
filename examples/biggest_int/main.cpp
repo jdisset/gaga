@@ -22,6 +22,7 @@ std::default_random_engine IntDNA::globalRand =
 using namespace GAGA;
 int main(int argc, char **argv) {
 	GA<IntDNA, BiggestIntEvaluator<Individual<IntDNA>>> evo(argc, argv);
+	evo.setVerbosity(1);
 	evo.setNbGenerations(400);
 	return evo.start();
 }

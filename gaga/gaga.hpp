@@ -1,4 +1,4 @@
-// Gaga: "grosse ambiance" genetic algorithm library
+// Gaga: lightweight simple genetic algorithm library
 // Copyright (c) Jean Disset 2015, All rights reserved.
 
 // This library is free software; you can redistribute it and/or
@@ -425,7 +425,7 @@ public:
 					vector<Individual<DNA>> batch = Individual<DNA>::loadPopFromJSON(o);
 					population.insert(population.end(), batch.begin(), batch.end());
 					if (verbosity >= 3) {
-						cerr << endl
+						cout << endl
 						     << "Proc " << procId << " : reception of " << batch.size()
 						     << " treated individuals from proc " << source << endl;
 					}
@@ -447,8 +447,8 @@ public:
 						if (avgD > stats[currentGeneration]["novelty"]["max"]) { // new best
 							stats[currentGeneration]["novelty"]["max"] = avgD;     // new best
 							if (verbosity >= 2) {
-								cerr << " New best novelty: " << CYAN << avgD << NORMAL << endl;
-								cerr << footprintToString(ind.footprint);
+								cout << " New best novelty: " << CYAN << avgD << NORMAL << endl;
+								cout << footprintToString(ind.footprint);
 							}
 						}
 					}
@@ -459,19 +459,55 @@ public:
 					o.second["avg"] /= nbEval;
 				}
 				if (verbosity >= 1) {
+					int totalCol = 77;
+					std::stringstream buf;
 					cout << endl;
-					cout << YELLOW << " --------------------------------------------------- " << NORMAL << endl;
-					cout << PURPLE << " --------------------------------------------------- " << NORMAL << endl;
-					cout << GREENBOLD << "     generation " << currentGeneration << NORMAL << " done" << endl;
-					cout << "     " << GREEN << nbEval << NORMAL << " evaluations in " << totalTime.count() / 1000.0
-					     << "s." << endl;
+					buf << "GENERATION " << currentGeneration;
+					cout << endl
+					     << YELLOW << "+" << std::setfill('-') << std::setw(totalCol) << "-"
+					     << "+" << NORMAL << endl;
+					cout << YELLOW << "|" << std::setfill(' ') << std::setw(totalCol) << " "
+					     << "|" << NORMAL << endl;
+					cout << YELLOW << "|" << GREENBOLD;
+					printCentered(totalCol, buf.str());
+					cout << YELLOW << "|" << NORMAL << endl;
+					cout << YELLOW << "|" << std::setfill(' ') << std::setw(totalCol) << " "
+					     << "|" << NORMAL << endl;
+					cout << YELLOW << "|" << std::setfill(' ') << std::setw(totalCol) << " "
+					     << "|" << NORMAL << endl;
+					buf = std::stringstream();
+					buf << nbEval << " evaluations in " << totalTime.count() / 1000.0 << ".s";
+					cout << YELLOW << "|" << PURPLE;
+					printCentered(totalCol, buf.str());
+					cout << YELLOW << "|" << NORMAL << endl;
+					cout << "+" << std::setfill('-') << std::setw(totalCol) << "-"
+					     << "+" << endl;
+
+					int nCol = totalCol - 2;
+					cout << YELLOW << "|" << CYAN;
+					printCentered(nCol / 3, "Obj name");
+					cout << GREY << "|" << CYAN;
+					printCentered(nCol / 3, "Best");
+					cout << GREY << "|" << CYAN;
+					printCentered(nCol / 3, "Avg");
+					cout << YELLOW << "|" << NORMAL << endl;
+					cout << "+" << GREY << std::setfill('-') << std::setw(totalCol) << "-" << NORMAL << "+" << endl;
 					for (auto &o : stats[currentGeneration]) {
-						cout << "     " << o.first << " : best = " << CYAN << o.second["max"]
-						     << NORMAL " ; avg = " << PURPLE << o.second["avg"] << NORMAL << endl;
-						cout << PURPLE << " --------------------------------------------------- " << NORMAL << endl;
-						cout << YELLOW << " --------------------------------------------------- " << NORMAL << endl
-						     << endl;
+						cout << YELLOW << "|" << GREEN;
+						printCentered(nCol / 3, o.first);
+						cout << GREY << "|" << NORMAL;
+						buf = std::stringstream();
+						buf << o.second["max"];
+						printCentered(nCol / 3, buf.str());
+						cout << GREY << "|" << NORMAL;
+						buf = std::stringstream();
+						buf << o.second["avg"];
+						printCentered(nCol / 3, buf.str());
+						cout << YELLOW << "|" << NORMAL << endl;
+						cout << "+" << GREY << std::setfill('-') << std::setw(totalCol) << "-" << NORMAL << "+" << endl;
 					}
+					cout << YELLOW << "+" << std::setfill('-') << std::setw(totalCol) << "-"
+					     << "+" << NORMAL << endl;
 				}
 				stats[currentGeneration]["global"]["time"] = totalTime.count() / 1000.0;
 				// we save everybody
@@ -489,6 +525,13 @@ public:
 		MPI_Finalize();
 #endif
 		return 0;
+	}
+
+	// print helper
+	void printCentered(unsigned int totalCol, const string &s) {
+		int c = 2 * ((totalCol - (s.size())) / 2) + s.size() == totalCol ? 0 : 1;
+		cout << std::setfill(' ') << std::setw((totalCol - s.size()) / 2) << " " << s
+		     << std::setw(c + (totalCol - s.size()) / 2) << " ";
 	}
 
 	/*********************************************************************************
@@ -518,6 +561,7 @@ public:
 					}
 				}
 			}
+			cerr << " actual merging..." << endl;
 			while (archive.size() > maxArchiveSize) {
 				// we merge the closest ones
 				int closestId0 = 0;
