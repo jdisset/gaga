@@ -22,12 +22,13 @@
 class IntDNA {
 	using json = nlohmann::json;
 
-private:
-	std::uniform_int_distribution<int> distribution = std::uniform_int_distribution<int>(0, 1000000);
+ private:
+	std::uniform_int_distribution<int> distribution =
+	    std::uniform_int_distribution<int>(0, 1000000);
 	int value1 = 0;
 	int value2 = 0;
 
-public:
+ public:
 	IntDNA(int v1, int v2) : value1(v1), value2(v2) {}
 
 	/********************************************************
@@ -40,9 +41,11 @@ public:
 		value2 = o["value2"];
 	}
 
-	// It must have a static "random" constructor which will be used to create the first generation
+	// It must have a static "random" constructor which will be used to create the first
+	// generation
 	static IntDNA random(int, char **) {
-		std::uniform_int_distribution<int> dist = std::uniform_int_distribution<int>(0, 1000000);
+		std::uniform_int_distribution<int> dist =
+		    std::uniform_int_distribution<int>(0, 1000000);
 		return IntDNA(dist(globalRand), dist(globalRand));
 	}
 
@@ -63,12 +66,12 @@ public:
 	// A reset method (just to cleanup things before a new evaluation)
 	void reset() {}
 
-	// And a method that returns a json object
-	nlohmann::json toJSON() const {
+	// And a method that returns a json string
+	std::string toJSON() const {
 		json o;
 		o["value1"] = value1;
 		o["value2"] = value2;
-		return o;
+		return o.dump(2);
 	}
 	/*******************************************************/
 
