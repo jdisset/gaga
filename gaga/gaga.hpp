@@ -60,7 +60,6 @@ namespace GAGA {
 
 using std::vector;
 using std::string;
-using std::set;
 using std::unordered_set;
 using std::map;
 using std::unordered_map;
