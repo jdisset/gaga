@@ -681,8 +681,8 @@ template <typename DNA, typename Evaluator> class GA {
 			while (nextGen.size() < popGoal) {
 				vector<Individual<DNA>> tournament;
 				for (unsigned int i = 0; i < tournamentSize; ++i) {
-					int id = dint(globalRand);
-					tournament.push_back(population[id]);
+					int selected = dint(globalRand);
+					tournament.push_back(population[selected]);
 				}
 				Individual<DNA> winner = tournament[0];
 				for (unsigned int i = 1; i < tournamentSize; ++i) {
