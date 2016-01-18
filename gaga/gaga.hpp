@@ -204,7 +204,7 @@ template <typename DNA, typename Evaluator> class GA {
 	unsigned int verbosity =
 	    2;  // 0 = silent; 1 = generations stats; 2 = individuals stats; 3 = everything
 	unsigned int popSize = 500;       // nb of individuals in the population
-	unsigned int nbElites = 1;        // nb of elites to keep accross generations
+	unsigned int nbElites = 2;        // nb of elites to keep accross generations
 	unsigned int nbSavedElites = 1;   // nb of elites to save
 	unsigned int tournamentSize = 3;  // nb of competitors in tournament
 	unsigned int nbGen = 500;         // nb of generations
@@ -213,9 +213,9 @@ template <typename DNA, typename Evaluator> class GA {
 	unsigned int KNN = 15;          // size of the neighbourhood for novelty
 	unsigned int saveInterval = 1;  // interval between 2 whole population saves
 	string folder = "../evos/";     // where to save the results
-	double crossoverProba = 0.3;    // crossover probability
+	double crossoverProba = 0.2;    // crossover probability
 	double mutationProba = 0.5;     // mutation probablility
-	map<string, double>
+	unordered_map<string, double>
 	    proportions;  // {{"baseObj", 0.25}, {"novelty", 0.75}};  // fitness weight
 	                  // proportions contains the relative weights of the objectives
 	                  // if an objective is not present here but still used at evaluation
@@ -258,7 +258,7 @@ template <typename DNA, typename Evaluator> class GA {
 	int argc = 1;
 	char **argv = nullptr;
 
-	vector<map<string, map<string, double>>> stats;  // fitnesses stats
+	vector<unordered_map<string, unordered_map<string, double>>> stats;  // fitnesses stats
 	std::default_random_engine globalRand = std::default_random_engine(
 	    std::chrono::system_clock::now().time_since_epoch().count());
 
@@ -368,7 +368,7 @@ template <typename DNA, typename Evaluator> class GA {
 					omp_set_lock(&statsLock);
 #endif
 					while (stats.size() <= currentGeneration) {
-						stats.push_back(map<string, map<string, double>>());
+						stats.push_back(unordered_map<string, unordered_map<string, double>>());
 					}
 					for (auto &o : population[i].fitnesses) {
 						if (!stats[currentGeneration].count(o.first)) {
@@ -679,35 +679,35 @@ template <typename DNA, typename Evaluator> class GA {
 		for (auto &o : objPop) {
 			unsigned int popGoal = nextGen.size() + static_cast<unsigned int>(o.second);
 			while (nextGen.size() < popGoal) {
-				vector<Individual<DNA>> tournament;
+				std::vector<Individual<DNA> *> tournament;
+				tournament.resize(tournamentSize);
 				for (unsigned int i = 0; i < tournamentSize; ++i) {
 					int selected = dint(globalRand);
-					tournament.push_back(population[selected]);
+					tournament[i] = &population[selected];
 				}
-				Individual<DNA> winner = tournament[0];
+				Individual<DNA> *winner = tournament[0];
 				for (unsigned int i = 1; i < tournamentSize; ++i) {
-					assert(tournament[i].fitnesses.count(o.first));
-					if (tournament[i].fitnesses.at(o.first) > winner.fitnesses.at(o.first)) {
+					assert(tournament[i]->fitnesses.count(o.first));
+					if (tournament[i]->fitnesses.at(o.first) > winner->fitnesses.at(o.first)) {
 						winner = tournament[i];
 					}
 				}
-				if (d(globalRand) < mutationProba) {  // mutation
-					winner.dna.mutate();
+				auto winnerclone = *winner;
+				if (d(globalRand) <= mutationProba) {  // mutation
+					winnerclone.dna.mutate();
 				}
-				nextGen.push_back(winner);
+				nextGen.push_back(winnerclone);
 			}
 		}
 		if (verbosity >= 3) {
 			cerr << " ... crossovers" << endl;
 		}
 		population.clear();
-
-		// uniform_int_distribution<int> dint2(firstNonEliteIndex, nextGen.size() - 1);
 		for (unsigned int pi = 0; pi < nextGen.size(); ++pi) {
 			auto &p1 = nextGen[pi];
 			if (pi >= firstNonEliteIndex && d(globalRand) < crossoverProba) {
 				unsigned int r = dint(globalRand);
-				Individual<DNA> &p2 = nextGen[r];
+				const Individual<DNA> &p2 = nextGen[r];
 				population.push_back(Individual<DNA>(p1.dna.crossover(p2.dna)));
 			} else {
 				population.push_back(p1);
