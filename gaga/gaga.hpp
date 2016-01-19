@@ -347,73 +347,75 @@ template <typename DNA, typename Evaluator> class GA {
 #endif
 			for (size_t i = 0; i < population.size(); ++i) {
 				population[i].dna.reset();
-				if (!population[i].evaluated) {
+				double totalTime = 0.0;
+				if (population[i].evaluated) {
+					if (verbosity >= 3)
+						std::cout << "Ind " << i << " already evaluated" << std::endl;
+				} else {
 #ifndef CLUSTER
 					nbEval++;
 #endif
-					if (verbosity >= 3) {
-						cerr << "Starting evaluation of ind " << i << endl;
-					}
+					if (verbosity >= 3)
+						std::cout << "Starting evaluation of ind " << i << std::endl;
+
 					auto t0 = high_resolution_clock::now();
 					evaluate(population[i]);
 					auto t1 = high_resolution_clock::now();
-					if (verbosity >= 3) {
-						cerr << "Evaluation ended " << i << endl;
-					}
-					// STATS:
-					milliseconds totalTime = std::chrono::duration_cast<milliseconds>(t1 - t0);
-					std::ostringstream indStatus;
-					unordered_set<string> best;
+					if (verbosity >= 3) std::cerr << "Evaluation ended " << i << std::endl;
+					totalTime = std::chrono::duration<double>(t1 - t0).count();
+				}
+				// STATS:
+				std::ostringstream indStatus;
+				unordered_set<string> best;
 #ifdef OMP
-					omp_set_lock(&statsLock);
+				omp_set_lock(&statsLock);
 #endif
-					while (stats.size() <= currentGeneration) {
-						stats.push_back(unordered_map<string, unordered_map<string, double>>());
+				while (stats.size() <= currentGeneration) {
+					stats.push_back(unordered_map<string, unordered_map<string, double>>());
+				}
+				for (auto &o : population[i].fitnesses) {
+					if (!stats[currentGeneration].count(o.first)) {
+						stats[currentGeneration][o.first]["max"] = -1e30;
+						stats[currentGeneration][o.first]["min"] = 1e30;
+						stats[currentGeneration][o.first]["avg"] = 0;
 					}
+					stats[currentGeneration][o.first]["avg"] += o.second;
+					if (o.second > stats[currentGeneration][o.first]["max"]) {  // new best
+						best.insert(o.first);
+						stats[currentGeneration][o.first]["max"] = o.second;
+					}
+					if (o.second < stats[currentGeneration][o.first]["min"]) {
+						stats[currentGeneration][o.first]["min"] = o.second;
+					}
+				}
+				if (verbosity >= 1) {
+					indStatus << endl
+					          << " Proc " << PURPLE << procId << NORMAL << " : Ind " << YELLOW
+					          << std::setw(3) << i << NORMAL << " evaluated in " GREEN
+					          << std::setw(3) << std::setprecision(1) << std::fixed << totalTime
+					          << NORMAL << "s :";
 					for (auto &o : population[i].fitnesses) {
-						if (!stats[currentGeneration].count(o.first)) {
-							stats[currentGeneration][o.first]["max"] = -1e30;
-							stats[currentGeneration][o.first]["min"] = 1e30;
-							stats[currentGeneration][o.first]["avg"] = 0;
+						indStatus << " " << o.first << " : ";
+						if (best.count(o.first)) {
+							indStatus << CYANBOLD;
+						} else {
+							indStatus << GREEN;
 						}
-						stats[currentGeneration][o.first]["avg"] += o.second;
-						if (o.second > stats[currentGeneration][o.first]["max"]) {  // new best
-							best.insert(o.first);
-							stats[currentGeneration][o.first]["max"] = o.second;
-						}
-						if (o.second < stats[currentGeneration][o.first]["min"]) {
-							stats[currentGeneration][o.first]["min"] = o.second;
-						}
+						double val = o.second;
+						indStatus << val << NORMAL << ";";
 					}
-					if (verbosity >= 1) {
-						indStatus << endl
-						          << " Proc " << PURPLE << procId << NORMAL << " : Ind " << YELLOW
-						          << std::setw(3) << i << NORMAL << " evaluated in " GREEN
-						          << std::setw(3) << std::setprecision(1) << std::fixed
-						          << totalTime.count() / 1000.0f << NORMAL << "s :";
-						for (auto &o : population[i].fitnesses) {
-							indStatus << " " << o.first << " : ";
-							if (best.count(o.first)) {
-								indStatus << CYANBOLD;
-							} else {
-								indStatus << GREEN;
-							}
-							double val = o.second;
-							indStatus << val << NORMAL << ";";
-						}
-						if (best.size() > 0) {
-							indStatus << endl;
-							indStatus << GA<DNA, Evaluator>::footprintToString(population[i].footprint);
-							indStatus << endl;
-						}
+					if (best.size() > 0) {
+						indStatus << endl;
+						indStatus << GA<DNA, Evaluator>::footprintToString(population[i].footprint);
+						indStatus << endl;
 					}
 					if (verbosity >= 2) {
 						cout << indStatus.str();
 					}
-#ifdef OMP
-					omp_unset_lock(&statsLock);
-#endif
 				}
+#ifdef OMP
+				omp_unset_lock(&statsLock);
+#endif
 			}
 #ifdef CLUSTER
 			if (procId != 0) {  // if slave process we send our population to our mighty leader
@@ -465,7 +467,7 @@ template <typename DNA, typename Evaluator> class GA {
 					}
 				}
 				auto tg1 = high_resolution_clock::now();
-				milliseconds totalTime = std::chrono::duration_cast<milliseconds>(tg1 - tg0);
+				double totalTime = std::chrono::duration<double>(tg1 - tg0).count();
 				for (auto &o : stats[currentGeneration]) {
 					o.second["avg"] /= nbEval;
 				}
@@ -487,7 +489,7 @@ template <typename DNA, typename Evaluator> class GA {
 					cout << YELLOW << "|" << std::setfill(' ') << std::setw(totalCol) << " "
 					     << "|" << NORMAL << endl;
 					buf = std::stringstream();
-					buf << nbEval << " evaluations in " << totalTime.count() / 1000.0 << ".s";
+					buf << nbEval << " evaluations in " << totalTime << "s";
 					cout << YELLOW << "|" << PURPLE;
 					printCentered(totalCol, buf.str());
 					cout << YELLOW << "|" << NORMAL << endl;
@@ -522,7 +524,7 @@ template <typename DNA, typename Evaluator> class GA {
 					cout << YELLOW << "+" << std::setfill('-') << std::setw(totalCol) << "-"
 					     << "+" << NORMAL << endl;
 				}
-				stats[currentGeneration]["global"]["time"] = totalTime.count() / 1000.0;
+				stats[currentGeneration]["global"]["time"] = totalTime;
 				// we save everybody
 				if (currentGeneration % saveInterval == 0) savePop();
 				saveBests(nbSavedElites);
@@ -671,7 +673,7 @@ template <typename DNA, typename Evaluator> class GA {
 			if (id++ < static_cast<int>(objPop.size() - 1)) {
 				o.second = static_cast<int>(o.second * static_cast<double>(availableSpots));
 				cpt += o.second;
-			} else {  // if it's the last obj, we complete
+			} else {  // if it's the last objective, we fill up the rest 
 				o.second = availableSpots - cpt;
 			}
 		}
@@ -753,16 +755,14 @@ template <typename DNA, typename Evaluator> class GA {
 	/*********************************************************************************
 	 *                          NOVELTY RELATED METHODS
 	 ********************************************************************************/
-	// Notes about novelty
-	// novelty works with footprints. A footprint is just a vector of vector of doubles
-	// it is recommended that those doubles are within a same order of magnitude
-	// each vector of double is a "snapshot" : it represents the state of the evaluation of
-	// one individual
-	// at a certain time. Thus, a complete footprint is a combination (a vector) of one or
-	// more snapshot
-	// taken at different points in the simulation. Snapshot must be of same size accross
-	// individuals
-	// footprint must be set in the evaluator (see examples)
+	// Novelty works with footprints. A footprint is just a vector of vector of doubles.
+	// It is recommended that those doubles are within a same order of magnitude.
+	// Each vector<double> is a "snapshot": it represents the state of the evaluation of
+	// one individual at a certain time. Thus, a complete footprint is a combination
+	// of one or more snapshot taken at different points in the
+	// simulation (a vector<vector<double>>).
+	// Snapshot must be of same size accross individuals.
+	// Footprint must be set in the evaluator (see examples)
 
 	static double getFootprintDistance(const fpType &f0, const fpType &f1) {
 		assert(f0.size() == f1.size());
@@ -777,8 +777,8 @@ template <typename DNA, typename Evaluator> class GA {
 	}
 
 	// computeAvgDist (novelty related)
-	// returns the average distance of a foot print fp to its k nearest neighbours
-	// in a collection of footprints arch
+	// returns the average distance of a footprint fp to its k nearest neighbours
+	// in an archive of footprints
 	static double computeAvgDist(unsigned int k, const archType &arch, const fpType &fp) {
 		archType knn;
 		double avgDist = 0;
@@ -832,7 +832,7 @@ template <typename DNA, typename Evaluator> class GA {
 		return res.str();
 	}
 	/*********************************************************************************
-	 *                         EAT / SAVE / RAVE / REPEAT
+	 *                         SAVING STUFF
 	 ********************************************************************************/
 	void saveBests(int n) {
 		// save n bests dnas for all objectives
