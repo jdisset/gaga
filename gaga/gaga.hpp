@@ -292,6 +292,7 @@ template <typename DNA, typename Evaluator> class GA {
 	int start() {
 		for (unsigned int i = 0; i < popSize; ++i) {
 			population.push_back(Individual<DNA>(DNA::random(argc, argv)));
+			population[population.size() - 1].evaluated = false;
 		}
 		createFolder(folder);
 		bool finished = false;
@@ -357,6 +358,7 @@ template <typename DNA, typename Evaluator> class GA {
 					auto t0 = high_resolution_clock::now();
 					evaluate(population[i]);
 					auto t1 = high_resolution_clock::now();
+					population[i].evaluated = true;
 					if (verbosity >= 3) {
 						cerr << "Evaluation ended " << i << endl;
 					}
@@ -695,6 +697,7 @@ template <typename DNA, typename Evaluator> class GA {
 				auto winnerclone = *winner;
 				if (d(globalRand) <= mutationProba) {  // mutation
 					winnerclone.dna.mutate();
+					winnerclone.evaluated = false;
 				}
 				nextGen.push_back(winnerclone);
 			}
@@ -709,6 +712,7 @@ template <typename DNA, typename Evaluator> class GA {
 				unsigned int r = dint(globalRand);
 				const Individual<DNA> &p2 = nextGen[r];
 				population.push_back(Individual<DNA>(p1.dna.crossover(p2.dna)));
+				population[population.size() - 1].evaluated = false;
 			} else {
 				population.push_back(p1);
 			}
@@ -931,6 +935,7 @@ template <typename DNA, typename Evaluator> class GA {
 		population.clear();
 		for (auto ind : o.at("population")) {
 			population.push_back(Individual<DNA>(DNA(ind.at("dna"))));
+			population[population.size() - 1].evaluated = false;
 		}
 	}
 
