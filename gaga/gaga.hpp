@@ -204,7 +204,7 @@ template <typename DNA, typename Evaluator> class GA {
 	unsigned int verbosity =
 	    2;  // 0 = silent; 1 = generations stats; 2 = individuals stats; 3 = everything
 	unsigned int popSize = 500;       // nb of individuals in the population
-	unsigned int nbElites = 2;        // nb of elites to keep accross generations
+	unsigned int nbElites = 1;        // nb of elites to keep accross generations
 	unsigned int nbSavedElites = 1;   // nb of elites to save
 	unsigned int tournamentSize = 3;  // nb of competitors in tournament
 	unsigned int nbGen = 500;         // nb of generations
@@ -272,7 +272,7 @@ template <typename DNA, typename Evaluator> class GA {
 		MPI_Comm_size(MPI_COMM_WORLD, &nbProcs);
 		MPI_Comm_rank(MPI_COMM_WORLD, &procId);
 		if (procId == 0) {
-			if (verbosity == 3) {
+			if (verbosity >= = 3) {
 				cerr << "   -------------------" << endl;
 				cerr << CYAN << " MPI STARTED WITH " << NORMAL << nbProcs << CYAN << " PROCS "
 				     << NORMAL << endl;
@@ -350,19 +350,30 @@ template <typename DNA, typename Evaluator> class GA {
 				population[i].dna.reset();
 				double totalTime = 0.0;
 				if (population[i].evaluated) {
-					if (verbosity >= 3)
-						std::cout << "Ind " << i << " already evaluated" << std::endl;
+					if (verbosity >= 3) {
+						std::stringstream msg;
+						msg << "Ind " << i << " already evaluated" << std::endl;
+						std::cout << msg.str();
+					}
 				} else {
 #ifndef CLUSTER
 					nbEval++;
 #endif
-					if (verbosity >= 3)
-						std::cout << "Starting evaluation of ind " << i << std::endl;
+					if (verbosity >= 3) {
+						std::stringstream msg;
+						msg << "Evaluation starting for ind " << i << std::endl;
+						std::cout << msg.str();
+					}
 
 					auto t0 = high_resolution_clock::now();
 					evaluate(population[i]);
 					auto t1 = high_resolution_clock::now();
-					if (verbosity >= 3) std::cerr << "Evaluation ended " << i << std::endl;
+					population[i].evaluated = true;
+					if (verbosity >= 3) {
+						std::stringstream msg;
+						msg << "Evaluation ended for ind " << i << std::endl;
+						std::cout << msg.str();
+					}
 					totalTime = std::chrono::duration<double>(t1 - t0).count();
 				}
 				// STATS:
@@ -394,7 +405,11 @@ template <typename DNA, typename Evaluator> class GA {
 					          << " Proc " << PURPLE << procId << NORMAL << " : Ind " << YELLOW
 					          << std::setw(3) << i << NORMAL << " evaluated in " GREEN
 					          << std::setw(3) << std::setprecision(1) << std::fixed << totalTime
-					          << NORMAL << "s :";
+					          << NORMAL << "s :" << std::endl;
+					if (verbosity >= 4) {
+						indStatus << " Ind " << i << "'s dna = " << population[i].dna.toJSON()
+						          << std::endl;
+					}
 					for (auto &o : population[i].fitnesses) {
 						indStatus << " " << o.first << " : ";
 						if (best.count(o.first)) {
@@ -638,10 +653,20 @@ template <typename DNA, typename Evaluator> class GA {
 		for (auto &o : population[0].fitnesses) {
 			objectives.push_back(o.first);  // we need to know what the objectives are
 		}
+		if (verbosity >= 3) {
+			std::cout << BLUE << "The objectives are" << NORMAL;
+			for (auto &s : objectives) {
+				std::cout << std::endl << " * " << s;
+			}
+			std::cout << std::endl;
+		}
 		map<string, vector<Individual<DNA>>> elites = getElites(objectives, nbElites);
 		// we put the elites in the nextGen
 		for (auto &e : elites) {
 			for (auto &i : e.second) {
+				if (verbosity >= 3) {
+					std::cout << "Elite added : " << i.dna.toJSON() << std::endl;
+				}
 				nextGen.push_back(i);
 			}
 		}
@@ -656,8 +681,8 @@ template <typename DNA, typename Evaluator> class GA {
 		}
 		// we need to know how much of each objective's representatives we will have
 		// if the proportion map has been set, we use it. Else we split equally
-		map<string, double> objPop;  // nb of ind per objective
-		double sum = 0;              // we need to be sure these proportions are normalized
+		unordered_map<string, double> objPop;  // nb of ind per objective
+		double sum = 0;  // we need to be sure these proportions are normalized
 		for (auto &o : objectives) {
 			if (proportions.count(o) > 0) {
 				objPop[o] = proportions.at(o);
@@ -674,18 +699,33 @@ template <typename DNA, typename Evaluator> class GA {
 			if (id++ < static_cast<int>(objPop.size() - 1)) {
 				o.second = static_cast<int>(o.second * static_cast<double>(availableSpots));
 				cpt += o.second;
-			} else {  // if it's the last objective, we fill up the rest 
+			} else {  // if it's the last objective, we fill up the rest
 				o.second = availableSpots - cpt;
+			}
+		}
+		if (verbosity >= 3) {
+			std::cout << "Population target per objectives after normalization: " << std::endl;
+			for (auto &op : objPop) {
+				std::cout << " * " << op.first << " = " << op.second << std::endl;
 			}
 		}
 
 		for (auto &o : objPop) {
 			unsigned int popGoal = nextGen.size() + static_cast<unsigned int>(o.second);
+
+			if (verbosity >= 3) {
+				std::cout << "Starting tournaments (" << tournamentSize
+				          << " competitors) for obj " << o.first << std::endl;
+			}
 			while (nextGen.size() < popGoal) {
 				std::vector<Individual<DNA> *> tournament;
 				tournament.resize(tournamentSize);
 				for (unsigned int i = 0; i < tournamentSize; ++i) {
 					int selected = dint(globalRand);
+					if (verbosity >= 3) {
+						std::cout << GREY << "Selected ind " << selected << " with fitness " << NORMAL
+						          << population[selected].fitnesses.at(o.first) << std::endl;
+					}
 					tournament[i] = &population[selected];
 				}
 				Individual<DNA> *winner = tournament[0];
@@ -696,9 +736,16 @@ template <typename DNA, typename Evaluator> class GA {
 					}
 				}
 				auto winnerclone = *winner;
+				if (verbosity >= 3) {
+					std::cout << "Winner's fitness = " << winnerclone.fitnesses.at(o.first)
+					          << std::endl;
+				}
 				if (d(globalRand) <= mutationProba) {  // mutation
 					winnerclone.dna.mutate();
 					winnerclone.evaluated = false;
+					if (verbosity >= 3) {
+						std::cout << GREEN << "Winner has mutated" << NORMAL << std::endl;
+					}
 				}
 				nextGen.push_back(winnerclone);
 			}
@@ -712,8 +759,20 @@ template <typename DNA, typename Evaluator> class GA {
 			if (pi >= firstNonEliteIndex && d(globalRand) < crossoverProba) {
 				unsigned int r = dint(globalRand);
 				const Individual<DNA> &p2 = nextGen[r];
+				if (verbosity >= 3) {
+					std::cerr << "crossing ind " << pi << " : " << BLUE << p1.dna.toJSON()
+					          << std::endl
+					          << NORMAL << " with ind " << r << " : " << YELLOW << p2.dna.toJSON()
+					          << NORMAL << std::endl;
+				}
 				population.push_back(Individual<DNA>(p1.dna.crossover(p2.dna)));
 				population[population.size() - 1].evaluated = false;
+				if (verbosity >= 3) {
+					std::cerr << "Child's dna = " << GREEN
+					          << population[population.size() - 1].dna.toJSON() << NORMAL
+					          << std::endl;
+				}
+
 			} else {
 				population.push_back(p1);
 			}
