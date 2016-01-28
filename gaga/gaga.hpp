@@ -300,7 +300,6 @@ template <typename DNA, typename Evaluator> class GA {
 			cout << GREEN << " Starting GA " << NORMAL << endl;
 		}
 		while (!finished) {
-			int nbEval = 0;
 			auto tg0 = high_resolution_clock::now();
 #ifdef CLUSTER
 			if (procId == 0) {
@@ -344,6 +343,10 @@ template <typename DNA, typename Evaluator> class GA {
 #ifdef OMP
 			omp_lock_t statsLock;
 			omp_init_lock(&statsLock);
+			int nbAlreadyEvaluated = 0;
+			for (const auto &p : population) {
+				if (p.evaluated) ++nbAlreadyEvaluated;
+			}
 #pragma omp parallel for schedule(dynamic, 1)
 #endif
 			for (size_t i = 0; i < population.size(); ++i) {
@@ -356,9 +359,6 @@ template <typename DNA, typename Evaluator> class GA {
 						std::cout << msg.str();
 					}
 				} else {
-#ifndef CLUSTER
-					nbEval++;
-#endif
 					if (verbosity >= 3) {
 						std::stringstream msg;
 						msg << "Evaluation starting for ind " << i << std::endl;
@@ -464,7 +464,6 @@ template <typename DNA, typename Evaluator> class GA {
 				// now we update novelty
 				if (novelty) {
 					for (auto &ind : population) {
-						nbEval++;
 						double avgD = GA<DNA, Evaluator>::computeAvgDist(KNN, archive, ind.footprint);
 						ind.fitnesses["novelty"] = avgD;
 						if (stats[currentGeneration].count("novelty") == 0) {
@@ -485,7 +484,7 @@ template <typename DNA, typename Evaluator> class GA {
 				auto tg1 = high_resolution_clock::now();
 				double totalTime = std::chrono::duration<double>(tg1 - tg0).count();
 				for (auto &o : stats[currentGeneration]) {
-					o.second["avg"] /= nbEval;
+					o.second["avg"] /= static_cast<double>(population.size());
 				}
 				if (verbosity >= 1) {
 					int totalCol = 77;
@@ -505,7 +504,8 @@ template <typename DNA, typename Evaluator> class GA {
 					cout << YELLOW << "|" << std::setfill(' ') << std::setw(totalCol) << " "
 					     << "|" << NORMAL << endl;
 					buf = std::stringstream();
-					buf << nbEval << " evaluations in " << totalTime << "s";
+					buf << population.size() - nbAlreadyEvaluated << " evaluations in " << totalTime
+					    << "s";
 					cout << YELLOW << "|" << PURPLE;
 					printCentered(totalCol, buf.str());
 					cout << YELLOW << "|" << NORMAL << endl;
