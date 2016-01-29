@@ -465,6 +465,12 @@ template <typename DNA, typename Evaluator> class GA {
 				if (novelty) {
 					for (auto &ind : population) {
 						double avgD = GA<DNA, Evaluator>::computeAvgDist(KNN, archive, ind.footprint);
+						if (verbosity >= 2) {
+							std::stringstream output;
+							output << " Ind [ " << footprintToString(ind.footprint)
+							       << "] novelty = " << CYAN << avgD << NORMAL << endl;
+							std::cout << output.str() << std::endl;
+						}
 						ind.fitnesses["novelty"] = avgD;
 						if (stats[currentGeneration].count("novelty") == 0) {
 							stats[currentGeneration]["novelty"]["max"] = -1e30;
@@ -874,11 +880,6 @@ template <typename DNA, typename Evaluator> class GA {
 			}
 		}
 		return avgDist;
-	}
-
-	void computeIndNovelty(const Individual<DNA> &i) {
-		i.fitnesses["novelty"] =
-		    GA<DNA, Evaluator>::computeAvgDist(KNN, archive, i.footprint);
 	}
 
 	// panpan cucul
