@@ -372,6 +372,10 @@ template <typename DNA, typename Evaluator> class GA {
 					if (verbosity >= 3) {
 						std::stringstream msg;
 						msg << "Evaluation ended for ind " << i << std::endl;
+						if (novelty) {
+							msg << "Footprint : " << footprintToString(population[i].footprint)
+							    << std::endl;
+						}
 						std::cout << msg.str();
 					}
 					totalTime = std::chrono::duration<double>(t1 - t0).count();
@@ -464,11 +468,11 @@ template <typename DNA, typename Evaluator> class GA {
 				// now we update novelty
 				if (novelty) {
 					for (auto &ind : population) {
-						double avgD = GA<DNA, Evaluator>::computeAvgDist(KNN, archive, ind.footprint);
+						double avgD = computeAvgDist(KNN, archive, ind.footprint);
 						if (verbosity >= 2) {
 							std::stringstream output;
-							output << " Ind [ " << footprintToString(ind.footprint)
-							       << "] novelty = " << CYAN << avgD << NORMAL << endl;
+							output << "[ " << footprintToString(ind.footprint) << "] novelty = " << CYAN
+							       << avgD << NORMAL << endl;
 							std::cout << output.str() << std::endl;
 						}
 						ind.fitnesses["novelty"] = avgD;
@@ -663,9 +667,6 @@ template <typename DNA, typename Evaluator> class GA {
 		// we put the elites in the nextGen
 		for (auto &e : elites) {
 			for (auto &i : e.second) {
-				if (verbosity >= 3) {
-					std::cout << "Elite added : " << i.dna.toJSON() << std::endl;
-				}
 				nextGen.push_back(i);
 			}
 		}
@@ -759,19 +760,11 @@ template <typename DNA, typename Evaluator> class GA {
 				unsigned int r = dint(globalRand);
 				const Individual<DNA> &p2 = nextGen[r];
 				if (verbosity >= 3) {
-					std::cerr << "crossing ind " << pi << " : " << BLUE << p1.dna.toJSON()
-					          << std::endl
-					          << NORMAL << " with ind " << r << " : " << YELLOW << p2.dna.toJSON()
-					          << NORMAL << std::endl;
+					std::cerr << "crossing ind " << BLUE << pi << NORMAL << " with ind " << YELLOW
+					          << r << NORMAL << std::endl;
 				}
 				population.push_back(Individual<DNA>(p1.dna.crossover(p2.dna)));
 				population[population.size() - 1].evaluated = false;
-				if (verbosity >= 3) {
-					std::cerr << "Child's dna = " << GREEN
-					          << population[population.size() - 1].dna.toJSON() << NORMAL
-					          << std::endl;
-				}
-
 			} else {
 				population.push_back(p1);
 			}
@@ -870,11 +863,10 @@ template <typename DNA, typename Evaluator> class GA {
 				}
 			}
 			assert(knn.size() == k);
-			double sumDist = 0;
 			double divisor = 0;
 			for (size_t i = 0; i < knn.size(); ++i) {
 				assert(getFootprintDistance(fp, knn[i].first) == knnDist[i]);
-				sumDist += knnDist[i] * static_cast<double>(knn[i].second);
+				avgDist += knnDist[i] * static_cast<double>(knn[i].second);
 				divisor += knn[i].second;
 			}
 			assert(divisor > 0);
