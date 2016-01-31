@@ -139,20 +139,20 @@ template <typename DNA> struct Individual {
 			snprintf(buf, sizeof(buf), "%a", f.second);
 			fitObject[f.first] = buf;
 		}
-		json fpArr;
+		vector<vector<string>> fpstr;
 		for (auto &f0 : footprint) {
-			vector<string> f(f0.size());
+			vector<string> f;
 			for (auto &f1 : f0) {
 				char buf[50];
 				snprintf(buf, sizeof(buf), "%a", f1);
 				f.push_back(buf);
 			}
-			fpArr.push_back(f);
+			fpstr.push_back(f);
 		}
 		json o;
 		o["dna"] = json::parse(dna.toJSON());
 		o["fitnesses"] = fitObject;
-		o["footprint"] = fpArr;
+		o["footprint"] = fpstr;
 		return o;
 	}
 
@@ -597,56 +597,49 @@ template <typename DNA, typename Evaluator> class GA {
 						    archive[i].first, archive[j].first);
 					}
 				}
-			}
-			cerr << " actual merging..." << endl;
-			while (archive.size() > maxArchiveSize) {
-				// we merge the closest ones
-				int closestId0 = 0;
-				int closestId1 = archive.size() - 1;
-				double closestDist = GA<DNA, Evaluator>::getFootprintDistance(
-				    archive[closestId0].first, archive[closestId1].first);
-				for (unsigned int id0 = 0; id0 < archive.size(); ++id0) {
-					for (unsigned int id1 = id0 + 1; id1 < archive.size(); ++id1) {
-						const double &dist = distanceMatrix[id0][id1];
-						if (dist < closestDist) {
-							closestDist = dist;
-							closestId0 = id0;
-							closestId1 = id1;
+				cerr << " actual merging..." << endl;
+				while (archive.size() > maxArchiveSize) {
+					// we merge the closest ones
+					int closestId0 = 0;
+					int closestId1 = archive.size() - 1;
+					double closestDist = GA<DNA, Evaluator>::getFootprintDistance(
+					    archive[closestId0].first, archive[closestId1].first);
+					for (unsigned int id0 = 0; id0 < archive.size(); ++id0) {
+						for (unsigned int id1 = id0 + 1; id1 < archive.size(); ++id1) {
+							const double &dist = distanceMatrix[id0][id1];
+							if (dist < closestDist) {
+								closestDist = dist;
+								closestId0 = id0;
+								closestId1 = id1;
+							}
 						}
-						// else if (dist == closestDist) {
-						// if (d(globalRand) < 0.001) {
-						// closestDist = dist;
-						// closestId0 = id0;
-						// closestId1 = id1;
-						//}
-						//}
 					}
-				}
-				vector<vector<double>> mean;
-				mean.resize(archive[closestId0].first.size());
-				for (size_t j = 0; j < archive[closestId0].first.size(); ++j) {
-					for (size_t k = 0; k < archive[closestId0].first[j].size(); ++k) {
-						mean[j].push_back(
-						    (archive[closestId0].first[j][k] * archive[closestId0].second +
-						     archive[closestId1].first[j][k] * archive[closestId1].second) /
-						    (archive[closestId0].second + archive[closestId1].second));
+					vector<vector<double>> mean;
+					mean.resize(archive[closestId0].first.size());
+					for (size_t j = 0; j < archive[closestId0].first.size(); ++j) {
+						for (size_t k = 0; k < archive[closestId0].first[j].size(); ++k) {
+							mean[j].push_back(
+							    (archive[closestId0].first[j][k] * archive[closestId0].second +
+							     archive[closestId1].first[j][k] * archive[closestId1].second) /
+							    (archive[closestId0].second + archive[closestId1].second));
+						}
 					}
-				}
-				archive[closestId0].first = mean;
-				archive[closestId0].second++;
-				archive.erase(archive.begin() + closestId1);
-				// update distanceMatrix
-				distanceMatrix.erase(distanceMatrix.begin() + closestId1);
-				for (auto &dm : distanceMatrix) {
-					dm.erase(dm.begin() + closestId1);
-				}
-				for (unsigned int i = 0; i < (unsigned int)closestId0; ++i) {
-					distanceMatrix[i][closestId0] = GA<DNA, Evaluator>::getFootprintDistance(
-					    archive[i].first, archive[closestId0].first);
-				}
-				for (unsigned int i = closestId0 + 1; i < archive.size(); ++i) {
-					distanceMatrix[closestId0][i] = GA<DNA, Evaluator>::getFootprintDistance(
-					    archive[i].first, archive[closestId0].first);
+					archive[closestId0].first = mean;
+					archive[closestId0].second++;
+					archive.erase(archive.begin() + closestId1);
+					// update distanceMatrix
+					distanceMatrix.erase(distanceMatrix.begin() + closestId1);
+					for (auto &dm : distanceMatrix) {
+						dm.erase(dm.begin() + closestId1);
+					}
+					for (unsigned int i = 0; i < (unsigned int)closestId0; ++i) {
+						distanceMatrix[i][closestId0] = GA<DNA, Evaluator>::getFootprintDistance(
+						    archive[i].first, archive[closestId0].first);
+					}
+					for (unsigned int i = closestId0 + 1; i < archive.size(); ++i) {
+						distanceMatrix[closestId0][i] = GA<DNA, Evaluator>::getFootprintDistance(
+						    archive[i].first, archive[closestId0].first);
+					}
 				}
 			}
 		}
@@ -850,6 +843,7 @@ template <typename DNA, typename Evaluator> class GA {
 	static double computeAvgDist(unsigned int k, const archType &arch, const fpType &fp) {
 		archType knn;
 		double avgDist = 0;
+		knn.reserve(k);
 		if (arch.size() > k) {
 			for (unsigned int i = 0; i < k; ++i) {
 				knn.push_back(arch[i]);
