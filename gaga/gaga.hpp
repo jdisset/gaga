@@ -209,7 +209,7 @@ template <typename DNA, typename Evaluator> class GA {
 	unsigned int tournamentSize = 3;  // nb of competitors in tournament
 	unsigned int nbGen = 500;         // nb of generations
 	unsigned int maxArchiveSize =
-	    2000;                       // nb of footprints to keep for novelty computations
+	    10000;                      // nb of footprints to keep for novelty computations
 	unsigned int KNN = 15;          // size of the neighbourhood for novelty
 	unsigned int saveInterval = 1;  // interval between 2 whole population saves
 	string folder = "../evos/";     // where to save the results
@@ -593,8 +593,8 @@ template <typename DNA, typename Evaluator> class GA {
 				for (unsigned int i = 0; i < archive.size(); ++i) {
 					distanceMatrix[i].resize(archive.size());
 					for (unsigned int j = i + 1; j < archive.size(); ++j) {
-						distanceMatrix[i][j] = GA<DNA, Evaluator>::getFootprintDistance(
-						    archive[i].first, archive[j].first);
+						distanceMatrix[i][j] =
+						    getFootprintDistance(archive[i].first, archive[j].first);
 					}
 				}
 				cerr << " actual merging..." << endl;
@@ -779,7 +779,6 @@ template <typename DNA, typename Evaluator> class GA {
 	}
 
 	map<string, vector<Individual<DNA>>> getElites(const vector<string> &obj, int n) {
-		assert(obj.size() > 0);
 		if (verbosity >= 3) {
 			cerr << "getElites : nbObj = " << obj.size() << " n = " << n << endl;
 		}
@@ -828,50 +827,58 @@ template <typename DNA, typename Evaluator> class GA {
 	static double getFootprintDistance(const fpType &f0, const fpType &f1) {
 		assert(f0.size() == f1.size());
 		double d = 0;
-		for (unsigned int i = 0; i < f0.size(); ++i) {
-			assert(f0[i].size() == f1[i].size());
-			for (unsigned int j = 0; j < f0[i].size(); ++j) {
-				d += pow(f0[i][j] - f1[i][j], 2);
+		for (size_t i = 0; i < f0.size(); ++i) {
+			for (size_t j = 0; j < f0[i].size(); ++j) {
+				d += std::pow(f0[i][j] - f1[i][j], 2);
 			}
 		}
-		return d;
+		return sqrt(d);
 	}
 
 	// computeAvgDist (novelty related)
 	// returns the average distance of a footprint fp to its k nearest neighbours
 	// in an archive of footprints
 	static double computeAvgDist(unsigned int k, const archType &arch, const fpType &fp) {
-		archType knn;
 		double avgDist = 0;
-		knn.reserve(k);
 		if (arch.size() > k) {
+			archType knn;
+			knn.reserve(k);
+			vector<double> knnDist;
+			knnDist.reserve(k);
+			std::pair<double, size_t> maxKnn = {getFootprintDistance(fp, arch[0].first),
+			                                    0};  // maxKnn is the worst among the knn
 			for (unsigned int i = 0; i < k; ++i) {
 				knn.push_back(arch[i]);
+				double d = getFootprintDistance(fp, arch[i].first);
+				knnDist.push_back(d);
+				if (d > maxKnn.first) {
+					maxKnn = {d, i};
+				}
 			}
-			for (unsigned int i = k; i < arch.size(); ++i) {
-				double d0 = GA<DNA, Evaluator>::getFootprintDistance(fp, arch[i].first);
-				for (auto j = knn.begin(); j != knn.end(); ++j) {
-					if (d0 < GA<DNA, Evaluator>::getFootprintDistance(fp, (*j).first)) {
-						knn.erase(j);
-						knn.push_back(arch[i]);
-						break;
+			for (size_t i = k; i < arch.size(); ++i) {
+				double d = getFootprintDistance(fp, arch[i].first);
+				if (d < maxKnn.first) {
+					knn[maxKnn.second] = arch[i];
+					knnDist[maxKnn.second] = d;
+					maxKnn.first = d;
+					// then we update maxKnn
+					for (size_t j = 0; j < knn.size(); ++j) {
+						if (knnDist[j] > maxKnn.first) {
+							maxKnn = {knnDist[j], j};
+						}
 					}
 				}
 			}
+			assert(knn.size() == k);
+			double sumDist = 0;
 			double divisor = 0;
-			for (auto &i : knn) {
-				double tmpD = GA<DNA, Evaluator>::getFootprintDistance(fp, i.first);
-				double divCoef = exp(-2.0 * tmpD) * i.second;
-				avgDist += tmpD * divCoef;
-				divisor += divCoef;
-				// avoid stagnation
-				if (tmpD == 0.0 && i.second >= static_cast<double>(k)) return 0.0;
+			for (size_t i = 0; i < knn.size(); ++i) {
+				assert(getFootprintDistance(fp, knn[i].first) == knnDist[i]);
+				sumDist += knnDist[i] * static_cast<double>(knn[i].second);
+				divisor += knn[i].second;
 			}
-			if (divisor == 0.0) {  // if this happens there's probably a bug somewhere
-				avgDist = 0;
-			} else {
-				avgDist /= divisor;
-			}
+			assert(divisor > 0);
+			avgDist /= divisor;
 		}
 		return avgDist;
 	}
