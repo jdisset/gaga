@@ -208,9 +208,9 @@ template <typename DNA, typename Evaluator> class GA {
 	unsigned int nbSavedElites = 1;   // nb of elites to save
 	unsigned int tournamentSize = 3;  // nb of competitors in tournament
 	unsigned int nbGen = 500;         // nb of generations
-	unsigned int maxArchiveSize =
-	    10000;                      // nb of footprints to keep for novelty computations
-	unsigned int KNN = 15;          // size of the neighbourhood for novelty
+	double minNoveltyForArchive =
+	    0.0001;                      // min novelty for being added to the general archive
+	unsigned int KNN = 5;           // size of the neighbourhood for novelty
 	unsigned int saveInterval = 1;  // interval between 2 whole population saves
 	string folder = "../evos/";     // where to save the results
 	double crossoverProba = 0.2;    // crossover probability
@@ -232,7 +232,6 @@ template <typename DNA, typename Evaluator> class GA {
 	void setNbSavedElites(unsigned int n) { nbSavedElites = n; }
 	void setTournamentSize(unsigned int n) { tournamentSize = n; }
 	void setNbGenerations(unsigned int n) { nbGen = n; }
-	void setMaxArchiveSize(unsigned int n) { maxArchiveSize = n; }
 	void setKNN(unsigned int n) { KNN = n; }
 	void setPopSaveInterval(unsigned int n) { saveInterval = n; }
 	void setSaveFolder(string s) { folder = s; }
@@ -297,7 +296,46 @@ template <typename DNA, typename Evaluator> class GA {
 		createFolder(folder);
 		bool finished = false;
 		if (verbosity >= 1) {
-			cout << GREEN << " Starting GA " << NORMAL << endl;
+			int nbCol = 55;
+			std::cout << std::endl << GREY;
+			for (int i = 0; i < nbCol - 1; ++i) std::cout << "━";
+			std::cout << std::endl;
+			std::cout << YELLOW << "              ☀     " << NORMAL << " Starting GAGA "
+			          << YELLOW << "    ☀ " << NORMAL;
+			std::cout << std::endl << GREY;
+			for (int i = 0; i < nbCol - 1; ++i) std::cout << "┄";
+			std::cout << std::endl << NORMAL;
+			std::cout << "  ▹ population size = " << BLUE << popSize << NORMAL << std::endl;
+			std::cout << "  ▹ nb of elites = " << BLUE << nbElites << NORMAL << std::endl;
+			std::cout << "  ▹ nb of tournament competitors = " << BLUE << tournamentSize
+			          << NORMAL << std::endl;
+			std::cout << "  ▹ mutation rate = " << BLUE << mutationProba << NORMAL << std::endl;
+			std::cout << "  ▹ crossover rate = " << BLUE << crossoverProba << NORMAL
+			          << std::endl;
+			std::cout << "  ▹ writing results in " << BLUE << folder << NORMAL << std::endl;
+			if (novelty) {
+				std::cout << "  ▹ novelty is " << GREEN << "enabled" << NORMAL << std::endl;
+				std::cout << "    - KNN size = " << BLUE << KNN << NORMAL << std::endl;
+			} else {
+				std::cout << "  ▹ novelty is " << RED << "disabled" << NORMAL << std::endl;
+			}
+#ifdef CLUSTER
+			std::cout << "  ▹ MPI parralelisation is " << GREEN << "enabled" << NORMAL
+			          << std::endl;
+#else
+			std::cout << "  ▹ MPI parralelisation is " << RED << "disabled" << NORMAL
+			          << std::endl;
+#endif
+#ifdef OMP
+			std::cout << "  ▹ OpenMP parralelisation is " << GREEN << "enabled" << NORMAL
+			          << std::endl;
+#else
+			std::cout << "  ▹ OpenMP parralelisation is " << RED << "disabled" << NORMAL
+			          << std::endl;
+#endif
+			std::cout << GREY;
+			for (int i = 0; i < nbCol - 1; ++i) std::cout << "━";
+			std::cout << std::endl << NORMAL;
 		}
 		while (!finished) {
 			auto tg0 = high_resolution_clock::now();
@@ -352,16 +390,17 @@ template <typename DNA, typename Evaluator> class GA {
 			for (size_t i = 0; i < population.size(); ++i) {
 				population[i].dna.reset();
 				double totalTime = 0.0;
+				std::ostringstream indStatus;
 				if (population[i].evaluated) {
 					if (verbosity >= 3) {
 						std::stringstream msg;
-						msg << "Ind " << i << " already evaluated" << std::endl;
+						msg << "-◇- Ind " << i << " already evaluated" << std::endl;
 						std::cout << msg.str();
 					}
 				} else {
 					if (verbosity >= 3) {
 						std::stringstream msg;
-						msg << "Evaluation starting for ind " << i << std::endl;
+						msg << "-◇- Evaluation starting for ind " << i << std::endl;
 						std::cout << msg.str();
 					}
 
@@ -370,18 +409,15 @@ template <typename DNA, typename Evaluator> class GA {
 					auto t1 = high_resolution_clock::now();
 					population[i].evaluated = true;
 					if (verbosity >= 3) {
-						std::stringstream msg;
-						msg << "Evaluation ended for ind " << i << std::endl;
+						indStatus << "-◇- Evaluation ended for ind " << i << std::endl;
 						if (novelty) {
-							msg << "Footprint : " << footprintToString(population[i].footprint)
-							    << std::endl;
+							indStatus << " 👣  Footprint : "
+							          << footprintToString(population[i].footprint) << std::endl;
 						}
-						std::cout << msg.str();
 					}
 					totalTime = std::chrono::duration<double>(t1 - t0).count();
 				}
 				// STATS:
-				std::ostringstream indStatus;
 				unordered_set<string> best;
 #ifdef OMP
 				omp_set_lock(&statsLock);
@@ -405,11 +441,10 @@ template <typename DNA, typename Evaluator> class GA {
 					}
 				}
 				if (verbosity >= 1) {
-					indStatus << endl
-					          << " Proc " << PURPLE << procId << NORMAL << " : Ind " << YELLOW
-					          << std::setw(3) << i << NORMAL << " evaluated in " GREEN
-					          << std::setw(3) << std::setprecision(1) << std::fixed << totalTime
-					          << NORMAL << "s :" << std::endl;
+					indStatus << CYANBOLD << "✷ " << NORMAL << "(" << PURPLE << procId << NORMAL
+					          << ") ➳    Ind " << YELLOW << std::setw(3) << i << NORMAL
+					          << " evaluated in " GREEN << std::setw(3) << std::setprecision(1)
+					          << std::fixed << totalTime << NORMAL << "s" << std::endl;
 					if (verbosity >= 4) {
 						indStatus << " Ind " << i << "'s dna = " << population[i].dna.toJSON()
 						          << std::endl;
@@ -467,12 +502,23 @@ template <typename DNA, typename Evaluator> class GA {
 				// the end of a generation
 				// now we update novelty
 				if (novelty) {
+					auto savedArchiveSize = archive.size();
+					for (auto &ind : population) {
+						archive.push_back({ind.footprint, 1});
+					}
+					archType toBeAdded;
 					for (auto &ind : population) {
 						double avgD = computeAvgDist(KNN, archive, ind.footprint);
+						bool added = false;
+						if (avgD > minNoveltyForArchive) {
+							toBeAdded.push_back({ind.footprint, 1});
+							added = true;
+						}
 						if (verbosity >= 2) {
 							std::stringstream output;
 							output << "[ " << footprintToString(ind.footprint) << "] novelty = " << CYAN
-							       << avgD << NORMAL << endl;
+							       << avgD << NORMAL
+							       << (added ? "(added to archive)" : "(too low for archive)") << endl;
 							std::cout << output.str() << std::endl;
 						}
 						ind.fitnesses["novelty"] = avgD;
@@ -490,6 +536,18 @@ template <typename DNA, typename Evaluator> class GA {
 							}
 						}
 					}
+					if (currentGeneration > 0) {
+						archive.resize(savedArchiveSize);
+						archive.insert(std::end(archive), std::begin(toBeAdded), std::end(toBeAdded));
+						if (verbosity >= 2) {
+							std::stringstream output;
+							output << " Added " << toBeAdded.size() << " new footprints to the archive."
+							       << std::endl
+							       << "New archive size = " << archive.size() << " (was "
+							       << savedArchiveSize << ")." << std::endl;
+							std::cout << output.str() << std::endl;
+						}
+					}
 				}
 				auto tg1 = high_resolution_clock::now();
 				double totalTime = std::chrono::duration<double>(tg1 - tg0).count();
@@ -502,38 +560,38 @@ template <typename DNA, typename Evaluator> class GA {
 					cout << endl;
 					buf << "GENERATION " << currentGeneration;
 					cout << endl
-					     << YELLOW << "+" << std::setfill('-') << std::setw(totalCol) << "-"
+					     << GREY << "+" << std::setfill('-') << std::setw(totalCol) << "-"
 					     << "+" << NORMAL << endl;
-					cout << YELLOW << "|" << std::setfill(' ') << std::setw(totalCol) << " "
+					cout << GREY << "|" << std::setfill(' ') << std::setw(totalCol) << " "
 					     << "|" << NORMAL << endl;
-					cout << YELLOW << "|" << GREENBOLD;
+					cout << GREY << "|" << GREENBOLD;
 					printCentered(totalCol, buf.str());
-					cout << YELLOW << "|" << NORMAL << endl;
-					cout << YELLOW << "|" << std::setfill(' ') << std::setw(totalCol) << " "
+					cout << GREY << "|" << NORMAL << endl;
+					cout << GREY << "|" << std::setfill(' ') << std::setw(totalCol) << " "
 					     << "|" << NORMAL << endl;
-					cout << YELLOW << "|" << std::setfill(' ') << std::setw(totalCol) << " "
+					cout << GREY << "|" << std::setfill(' ') << std::setw(totalCol) << " "
 					     << "|" << NORMAL << endl;
 					buf = std::stringstream();
-					buf << population.size() - nbAlreadyEvaluated << " evaluations in " << totalTime
-					    << "s";
-					cout << YELLOW << "|" << PURPLE;
+					buf << PURPLE << population.size() - nbAlreadyEvaluated << NORMAL
+					    << " evaluations in " << BLUE << totalTime << NORMAL << "s";
+					cout << GREY << "|";
 					printCentered(totalCol, buf.str());
-					cout << YELLOW << "|" << NORMAL << endl;
+					cout << GREY << "|" << NORMAL << endl;
 					cout << "+" << std::setfill('-') << std::setw(totalCol) << "-"
 					     << "+" << endl;
 
 					int nCol = totalCol - 2;
-					cout << YELLOW << "|" << CYAN;
+					cout << GREY << "|" << CYAN;
 					printCentered(nCol / 3, "Obj name");
 					cout << GREY << "|" << CYAN;
 					printCentered(nCol / 3, "Best");
 					cout << GREY << "|" << CYAN;
 					printCentered(nCol / 3, "Avg");
-					cout << YELLOW << "|" << NORMAL << endl;
+					cout << GREY << "|" << NORMAL << endl;
 					cout << "+" << GREY << std::setfill('-') << std::setw(totalCol) << "-" << NORMAL
 					     << "+" << endl;
 					for (auto &o : stats[currentGeneration]) {
-						cout << YELLOW << "|" << GREEN;
+						cout << GREY << "|" << GREEN;
 						printCentered(nCol / 3, o.first);
 						cout << GREY << "|" << NORMAL;
 						buf = std::stringstream();
@@ -543,11 +601,11 @@ template <typename DNA, typename Evaluator> class GA {
 						buf = std::stringstream();
 						buf << o.second["avg"];
 						printCentered(nCol / 3, buf.str());
-						cout << YELLOW << "|" << NORMAL << endl;
+						cout << GREY << "|" << NORMAL << endl;
 						cout << "+" << GREY << std::setfill('-') << std::setw(totalCol) << "-"
 						     << NORMAL << "+" << endl;
 					}
-					cout << YELLOW << "+" << std::setfill('-') << std::setw(totalCol) << "-"
+					cout << GREY << "+" << std::setfill('-') << std::setw(totalCol) << "-"
 					     << "+" << NORMAL << endl;
 				}
 				stats[currentGeneration]["global"]["time"] = totalTime;
@@ -581,76 +639,9 @@ template <typename DNA, typename Evaluator> class GA {
 	// Là où qu'on fait les bébés.
 	void prepareNextPop() {
 		std::uniform_real_distribution<double> d(0.0, 1.0);
-		if (novelty) {
-			// first we archive the footprints
-			archive.reserve(population.size());
-			for (auto &i : population) {
-				archive.push_back(make_pair(i.footprint, 1));
-			}
-			vector<vector<double>> distanceMatrix;
-			if (archive.size() > maxArchiveSize) {
-				if (verbosity >= 3) {
-					cout << " ... merging " << RED << archive.size() << NORMAL << " into " << PURPLE
-					     << maxArchiveSize << NORMAL << " footprints ..." << endl;
-				}
-				distanceMatrix.resize(archive.size());
-				for (unsigned int i = 0; i < archive.size(); ++i) {
-					distanceMatrix[i].resize(archive.size());
-					for (unsigned int j = i + 1; j < archive.size(); ++j) {
-						distanceMatrix[i][j] =
-						    getFootprintDistance(archive[i].first, archive[j].first);
-					}
-				}
-				cerr << " actual merging..." << endl;
-				while (archive.size() > maxArchiveSize) {
-					// we merge the closest ones
-					int closestId0 = 0;
-					int closestId1 = archive.size() - 1;
-					double closestDist = GA<DNA, Evaluator>::getFootprintDistance(
-					    archive[closestId0].first, archive[closestId1].first);
-					for (unsigned int id0 = 0; id0 < archive.size(); ++id0) {
-						for (unsigned int id1 = id0 + 1; id1 < archive.size(); ++id1) {
-							const double &dist = distanceMatrix[id0][id1];
-							if (dist < closestDist) {
-								closestDist = dist;
-								closestId0 = id0;
-								closestId1 = id1;
-							}
-						}
-					}
-					vector<vector<double>> mean;
-					mean.resize(archive[closestId0].first.size());
-					for (size_t j = 0; j < archive[closestId0].first.size(); ++j) {
-						for (size_t k = 0; k < archive[closestId0].first[j].size(); ++k) {
-							mean[j].push_back(
-							    (archive[closestId0].first[j][k] * archive[closestId0].second +
-							     archive[closestId1].first[j][k] * archive[closestId1].second) /
-							    (archive[closestId0].second + archive[closestId1].second));
-						}
-					}
-					archive[closestId0].first = mean;
-					archive[closestId0].second++;
-					archive.erase(archive.begin() + closestId1);
-					// update distanceMatrix
-					distanceMatrix.erase(distanceMatrix.begin() + closestId1);
-					for (auto &dm : distanceMatrix) {
-						dm.erase(dm.begin() + closestId1);
-					}
-					for (unsigned int i = 0; i < (unsigned int)closestId0; ++i) {
-						distanceMatrix[i][closestId0] = GA<DNA, Evaluator>::getFootprintDistance(
-						    archive[i].first, archive[closestId0].first);
-					}
-					for (unsigned int i = closestId0 + 1; i < archive.size(); ++i) {
-						distanceMatrix[closestId0][i] = GA<DNA, Evaluator>::getFootprintDistance(
-						    archive[i].first, archive[closestId0].first);
-					}
-				}
-			}
-		}
 		if (verbosity >= 3) {
-			cerr << " ... copying elites" << endl;
+			cerr << "-◇- copying elites" << endl;
 		}
-		// then we copy the elite
 		vector<Individual<DNA>> nextGen;
 		vector<string> objectives;
 		for (auto &o : population[0].fitnesses) {
@@ -677,7 +668,7 @@ template <typename DNA, typename Evaluator> class GA {
 		// now we can start the tournament
 		std::uniform_int_distribution<int> dint(0, population.size() - 1);
 		if (verbosity >= 3) {
-			cerr << " ... starting tournaments" << endl;
+			cerr << "-◇- starting tournaments" << endl;
 		}
 		// we need to know how much of each objective's representatives we will have
 		// if the proportion map has been set, we use it. Else we split equally
@@ -751,7 +742,7 @@ template <typename DNA, typename Evaluator> class GA {
 			}
 		}
 		if (verbosity >= 3) {
-			cerr << " ... crossovers" << endl;
+			cerr << "-◇- crossovers" << endl;
 		}
 		population.clear();
 		for (unsigned int pi = 0; pi < nextGen.size(); ++pi) {
