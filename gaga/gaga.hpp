@@ -209,8 +209,8 @@ template <typename DNA, typename Evaluator> class GA {
 	unsigned int tournamentSize = 3;  // nb of competitors in tournament
 	unsigned int nbGen = 500;         // nb of generations
 	double minNoveltyForArchive =
-	    0.0001;                      // min novelty for being added to the general archive
-	unsigned int KNN = 5;           // size of the neighbourhood for novelty
+	    0.0002;                     // min novelty for being added to the general archive
+	unsigned int KNN = 10;          // size of the neighbourhood for novelty
 	unsigned int saveInterval = 1;  // interval between 2 whole population saves
 	string folder = "../evos/";     // where to save the results
 	double crossoverProba = 0.2;    // crossover probability
@@ -296,46 +296,7 @@ template <typename DNA, typename Evaluator> class GA {
 		createFolder(folder);
 		bool finished = false;
 		if (verbosity >= 1) {
-			int nbCol = 55;
-			std::cout << std::endl << GREY;
-			for (int i = 0; i < nbCol - 1; ++i) std::cout << "━";
-			std::cout << std::endl;
-			std::cout << YELLOW << "              ☀     " << NORMAL << " Starting GAGA "
-			          << YELLOW << "    ☀ " << NORMAL;
-			std::cout << std::endl << GREY;
-			for (int i = 0; i < nbCol - 1; ++i) std::cout << "┄";
-			std::cout << std::endl << NORMAL;
-			std::cout << "  ▹ population size = " << BLUE << popSize << NORMAL << std::endl;
-			std::cout << "  ▹ nb of elites = " << BLUE << nbElites << NORMAL << std::endl;
-			std::cout << "  ▹ nb of tournament competitors = " << BLUE << tournamentSize
-			          << NORMAL << std::endl;
-			std::cout << "  ▹ mutation rate = " << BLUE << mutationProba << NORMAL << std::endl;
-			std::cout << "  ▹ crossover rate = " << BLUE << crossoverProba << NORMAL
-			          << std::endl;
-			std::cout << "  ▹ writing results in " << BLUE << folder << NORMAL << std::endl;
-			if (novelty) {
-				std::cout << "  ▹ novelty is " << GREEN << "enabled" << NORMAL << std::endl;
-				std::cout << "    - KNN size = " << BLUE << KNN << NORMAL << std::endl;
-			} else {
-				std::cout << "  ▹ novelty is " << RED << "disabled" << NORMAL << std::endl;
-			}
-#ifdef CLUSTER
-			std::cout << "  ▹ MPI parralelisation is " << GREEN << "enabled" << NORMAL
-			          << std::endl;
-#else
-			std::cout << "  ▹ MPI parralelisation is " << RED << "disabled" << NORMAL
-			          << std::endl;
-#endif
-#ifdef OMP
-			std::cout << "  ▹ OpenMP parralelisation is " << GREEN << "enabled" << NORMAL
-			          << std::endl;
-#else
-			std::cout << "  ▹ OpenMP parralelisation is " << RED << "disabled" << NORMAL
-			          << std::endl;
-#endif
-			std::cout << GREY;
-			for (int i = 0; i < nbCol - 1; ++i) std::cout << "━";
-			std::cout << std::endl << NORMAL;
+			printStart();
 		}
 		while (!finished) {
 			auto tg0 = high_resolution_clock::now();
@@ -375,7 +336,7 @@ template <typename DNA, typename Evaluator> class GA {
 			}
 #endif
 			if (verbosity >= 3) {
-				cerr << "population.size() = " << population.size() << endl;
+				cerr << "population size = " << population.size() << endl;
 			}
 
 #ifdef OMP
@@ -502,113 +463,17 @@ template <typename DNA, typename Evaluator> class GA {
 				// the end of a generation
 				// now we update novelty
 				if (novelty) {
-					auto savedArchiveSize = archive.size();
-					for (auto &ind : population) {
-						archive.push_back({ind.footprint, 1});
-					}
-					archType toBeAdded;
-					for (auto &ind : population) {
-						double avgD = computeAvgDist(KNN, archive, ind.footprint);
-						bool added = false;
-						if (avgD > minNoveltyForArchive) {
-							toBeAdded.push_back({ind.footprint, 1});
-							added = true;
-						}
-						if (verbosity >= 2) {
-							std::stringstream output;
-							output << "[ " << footprintToString(ind.footprint) << "] novelty = " << CYAN
-							       << avgD << NORMAL
-							       << (added ? "(added to archive)" : "(too low for archive)") << endl;
-							std::cout << output.str() << std::endl;
-						}
-						ind.fitnesses["novelty"] = avgD;
-						if (stats[currentGeneration].count("novelty") == 0) {
-							stats[currentGeneration]["novelty"]["max"] = -1e30;
-							stats[currentGeneration]["novelty"]["min"] = 1e30;
-							stats[currentGeneration]["novelty"]["avg"] = 0;
-						}
-						stats[currentGeneration]["novelty"]["avg"] += ind.fitnesses.at("novelty");
-						if (avgD > stats[currentGeneration]["novelty"]["max"]) {  // new best
-							stats[currentGeneration]["novelty"]["max"] = avgD;      // new best
-							if (verbosity >= 2) {
-								cout << " New best novelty: " << CYAN << avgD << NORMAL << endl;
-								cout << footprintToString(ind.footprint);
-							}
-						}
-					}
-					if (currentGeneration > 0) {
-						archive.resize(savedArchiveSize);
-						archive.insert(std::end(archive), std::begin(toBeAdded), std::end(toBeAdded));
-						if (verbosity >= 2) {
-							std::stringstream output;
-							output << " Added " << toBeAdded.size() << " new footprints to the archive."
-							       << std::endl
-							       << "New archive size = " << archive.size() << " (was "
-							       << savedArchiveSize << ")." << std::endl;
-							std::cout << output.str() << std::endl;
-						}
-					}
+					updateNovelty();
 				}
 				auto tg1 = high_resolution_clock::now();
 				double totalTime = std::chrono::duration<double>(tg1 - tg0).count();
+				stats[currentGeneration]["global"]["time"] = totalTime;
 				for (auto &o : stats[currentGeneration]) {
 					o.second["avg"] /= static_cast<double>(population.size());
 				}
 				if (verbosity >= 1) {
-					int totalCol = 77;
-					std::stringstream buf;
-					cout << endl;
-					buf << "GENERATION " << currentGeneration;
-					cout << endl
-					     << GREY << "+" << std::setfill('-') << std::setw(totalCol) << "-"
-					     << "+" << NORMAL << endl;
-					cout << GREY << "|" << std::setfill(' ') << std::setw(totalCol) << " "
-					     << "|" << NORMAL << endl;
-					cout << GREY << "|" << GREENBOLD;
-					printCentered(totalCol, buf.str());
-					cout << GREY << "|" << NORMAL << endl;
-					cout << GREY << "|" << std::setfill(' ') << std::setw(totalCol) << " "
-					     << "|" << NORMAL << endl;
-					cout << GREY << "|" << std::setfill(' ') << std::setw(totalCol) << " "
-					     << "|" << NORMAL << endl;
-					buf = std::stringstream();
-					buf << PURPLE << population.size() - nbAlreadyEvaluated << NORMAL
-					    << " evaluations in " << BLUE << totalTime << NORMAL << "s";
-					cout << GREY << "|";
-					printCentered(totalCol, buf.str());
-					cout << GREY << "|" << NORMAL << endl;
-					cout << "+" << std::setfill('-') << std::setw(totalCol) << "-"
-					     << "+" << endl;
-
-					int nCol = totalCol - 2;
-					cout << GREY << "|" << CYAN;
-					printCentered(nCol / 3, "Obj name");
-					cout << GREY << "|" << CYAN;
-					printCentered(nCol / 3, "Best");
-					cout << GREY << "|" << CYAN;
-					printCentered(nCol / 3, "Avg");
-					cout << GREY << "|" << NORMAL << endl;
-					cout << "+" << GREY << std::setfill('-') << std::setw(totalCol) << "-" << NORMAL
-					     << "+" << endl;
-					for (auto &o : stats[currentGeneration]) {
-						cout << GREY << "|" << GREEN;
-						printCentered(nCol / 3, o.first);
-						cout << GREY << "|" << NORMAL;
-						buf = std::stringstream();
-						buf << o.second["max"];
-						printCentered(nCol / 3, buf.str());
-						cout << GREY << "|" << NORMAL;
-						buf = std::stringstream();
-						buf << o.second["avg"];
-						printCentered(nCol / 3, buf.str());
-						cout << GREY << "|" << NORMAL << endl;
-						cout << "+" << GREY << std::setfill('-') << std::setw(totalCol) << "-"
-						     << NORMAL << "+" << endl;
-					}
-					cout << GREY << "+" << std::setfill('-') << std::setw(totalCol) << "-"
-					     << "+" << NORMAL << endl;
+					printGenerationStats(nbAlreadyEvaluated);
 				}
-				stats[currentGeneration]["global"]["time"] = totalTime;
 				// we save everybody
 				if (currentGeneration % saveInterval == 0) savePop();
 				saveBests(nbSavedElites);
@@ -625,14 +490,6 @@ template <typename DNA, typename Evaluator> class GA {
 #endif
 		return 0;
 	}
-
-	// print helper
-	void printCentered(unsigned int totalCol, const string &s) {
-		int c = 2 * ((totalCol - (s.size())) / 2) + s.size() == totalCol ? 0 : 1;
-		cout << std::setfill(' ') << std::setw((totalCol - s.size()) / 2) << " " << s
-		     << std::setw(c + (totalCol - s.size()) / 2) << " ";
-	}
-
 	/*********************************************************************************
 	 *                            NEXT POP GETTING READY
 	 ********************************************************************************/
@@ -878,6 +735,164 @@ template <typename DNA, typename Evaluator> class GA {
 		}
 		return res.str();
 	}
+
+	/*********************************************************************************
+	 *                           PRINT & LOG HELPERS
+	 ********************************************************************************/
+	void printGenerationStats(int nbAlreadyEvaluated) {
+		int totalCol = 77;
+		std::stringstream buf;
+		cout << endl;
+		buf << "GENERATION " << currentGeneration;
+		cout << endl
+		     << GREY << "+" << std::setfill('-') << std::setw(totalCol) << "-"
+		     << "+" << NORMAL << endl;
+		cout << GREY << "|" << std::setfill(' ') << std::setw(totalCol) << " "
+		     << "|" << NORMAL << endl;
+		cout << GREY << "|" << GREENBOLD;
+		printCentered(totalCol, buf.str());
+		cout << GREY << "|" << NORMAL << endl;
+		cout << GREY << "|" << std::setfill(' ') << std::setw(totalCol) << " "
+		     << "|" << NORMAL << endl;
+		cout << GREY << "|" << std::setfill(' ') << std::setw(totalCol) << " "
+		     << "|" << NORMAL << endl;
+		buf = std::stringstream();
+		buf << PURPLE << population.size() - nbAlreadyEvaluated << NORMAL
+		    << " evaluations in " << BLUE << stats[currentGeneration]["global"]["time"]
+		    << NORMAL << "s";
+		cout << GREY << "|";
+		printCentered(totalCol, buf.str());
+		cout << GREY << "|" << NORMAL << endl;
+		cout << "+" << std::setfill('-') << std::setw(totalCol) << "-"
+		     << "+" << endl;
+
+		int nCol = totalCol - 2;
+		cout << GREY << "|" << CYAN;
+		printCentered(nCol / 3, "Obj name");
+		cout << GREY << "|" << CYAN;
+		printCentered(nCol / 3, "Best");
+		cout << GREY << "|" << CYAN;
+		printCentered(nCol / 3, "Avg");
+		cout << GREY << "|" << NORMAL << endl;
+		cout << GREY << "+" << std::setfill('-') << std::setw(totalCol) << "-"
+		     << "+" << NORMAL << endl;
+		for (auto &o : stats[currentGeneration]) {
+			if (o.first != "global") {
+				cout << GREY << "|" << GREEN;
+				printCentered(nCol / 3, o.first);
+				cout << GREY << "|" << NORMAL;
+				buf = std::stringstream();
+				buf << o.second["max"];
+				printCentered(nCol / 3, buf.str());
+				cout << GREY << "|" << NORMAL;
+				buf = std::stringstream();
+				buf << o.second["avg"];
+				printCentered(nCol / 3, buf.str());
+				cout << GREY << "|" << NORMAL << endl;
+				cout << GREY << "+" << std::setfill('-') << std::setw(totalCol) << "-"
+				     << "+" << NORMAL << endl;
+			}
+		}
+	}
+
+	void updateNovelty() {
+		auto savedArchiveSize = archive.size();
+		for (auto &ind : population) {
+			archive.push_back({ind.footprint, 1});
+		}
+		archType toBeAdded;
+		for (auto &ind : population) {
+			double avgD = computeAvgDist(KNN, archive, ind.footprint);
+			bool added = false;
+			if (avgD > minNoveltyForArchive) {
+				toBeAdded.push_back({ind.footprint, 1});
+				added = true;
+			}
+			if (verbosity >= 2) {
+				std::stringstream output;
+				output << "[ " << footprintToString(ind.footprint) << "] novelty = " << CYAN
+				       << avgD << NORMAL
+				       << (added ? "(added to archive)" : "(too low for archive)") << endl;
+				std::cout << output.str() << std::endl;
+			}
+			ind.fitnesses["novelty"] = avgD;
+			if (stats[currentGeneration].count("novelty") == 0) {
+				stats[currentGeneration]["novelty"]["max"] = -1e30;
+				stats[currentGeneration]["novelty"]["min"] = 1e30;
+				stats[currentGeneration]["novelty"]["avg"] = 0;
+			}
+			stats[currentGeneration]["novelty"]["avg"] += ind.fitnesses.at("novelty");
+			if (avgD > stats[currentGeneration]["novelty"]["max"]) {  // new best
+				stats[currentGeneration]["novelty"]["max"] = avgD;      // new best
+				if (verbosity >= 2) {
+					cout << " New best novelty: " << CYAN << avgD << NORMAL << endl;
+					cout << footprintToString(ind.footprint);
+				}
+			}
+		}
+		if (currentGeneration > 0) {
+			archive.resize(savedArchiveSize);
+			archive.insert(std::end(archive), std::begin(toBeAdded), std::end(toBeAdded));
+			if (verbosity >= 2) {
+				std::stringstream output;
+				output << " Added " << toBeAdded.size() << " new footprints to the archive."
+				       << std::endl
+				       << "New archive size = " << archive.size() << " (was " << savedArchiveSize
+				       << ")." << std::endl;
+				std::cout << output.str() << std::endl;
+			}
+		}
+	}
+
+	void printStart() {
+		int nbCol = 55;
+		std::cout << std::endl << GREY;
+		for (int i = 0; i < nbCol - 1; ++i) std::cout << "━";
+		std::cout << std::endl;
+		std::cout << YELLOW << "              ☀     " << NORMAL << " Starting GAGA " << YELLOW
+		          << "    ☀ " << NORMAL;
+		std::cout << std::endl << GREY;
+		for (int i = 0; i < nbCol - 1; ++i) std::cout << "┄";
+		std::cout << std::endl << NORMAL;
+		std::cout << "  ▹ population size = " << BLUE << popSize << NORMAL << std::endl;
+		std::cout << "  ▹ nb of elites = " << BLUE << nbElites << NORMAL << std::endl;
+		std::cout << "  ▹ nb of tournament competitors = " << BLUE << tournamentSize << NORMAL
+		          << std::endl;
+		std::cout << "  ▹ mutation rate = " << BLUE << mutationProba << NORMAL << std::endl;
+		std::cout << "  ▹ crossover rate = " << BLUE << crossoverProba << NORMAL << std::endl;
+		std::cout << "  ▹ writing results in " << BLUE << folder << NORMAL << std::endl;
+		if (novelty) {
+			std::cout << "  ▹ novelty is " << GREEN << "enabled" << NORMAL << std::endl;
+			std::cout << "    - KNN size = " << BLUE << KNN << NORMAL << std::endl;
+		} else {
+			std::cout << "  ▹ novelty is " << RED << "disabled" << NORMAL << std::endl;
+		}
+#ifdef CLUSTER
+		std::cout << "  ▹ MPI parralelisation is " << GREEN << "enabled" << NORMAL
+		          << std::endl;
+#else
+		std::cout << "  ▹ MPI parralelisation is " << RED << "disabled" << NORMAL
+		          << std::endl;
+#endif
+#ifdef OMP
+		std::cout << "  ▹ OpenMP parralelisation is " << GREEN << "enabled" << NORMAL
+		          << std::endl;
+#else
+		std::cout << "  ▹ OpenMP parralelisation is " << RED << "disabled" << NORMAL
+		          << std::endl;
+#endif
+		std::cout << GREY;
+		for (int i = 0; i < nbCol - 1; ++i) std::cout << "━";
+		std::cout << std::endl << NORMAL;
+	}
+
+	void printCentered(unsigned int totalCol, const string &s) {
+		int halfFree = (totalCol - s.size()) / 2;
+		int c = 2 * halfFree + s.size() == totalCol ? 0 : 1;
+		std::cout << std::setfill(' ') << std::setw(halfFree) << " " << s << std::setfill(' ')
+		          << std::setw(halfFree + c) << " ";
+	}
+
 	/*********************************************************************************
 	 *                         SAVING STUFF
 	 ********************************************************************************/
