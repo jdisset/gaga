@@ -23,6 +23,7 @@
 #include <vector>
 #include <chrono>
 #include <fstream>
+#include <sstream>
 #include <unordered_set>
 #include <unordered_map>
 #include <deque>
@@ -306,14 +307,14 @@ template <typename DNA, typename Evaluator> class GA {
 				// master will have the remaining
 				unsigned int batchSize = population.size() / nbProcs;
 				for (unsigned int dest = 1; dest < (unsigned int)nbProcs; ++dest) {
-					vector<Individual<DNA>> batch;
+					std::vector<Individual<DNA>> batch;
 					for (size_t ind = 0; ind < batchSize; ++ind) {
 						batch.push_back(population.back());
 						population.pop_back();
 					}
-					ostringstream batchOSS;
+					std::ostringstream batchOSS;
 					batchOSS << Individual<DNA>::popToJSON(batch);
-					string batchStr = batchOSS.str();
+					std::string batchStr = batchOSS.str();
 					MPI_Send(batchStr.c_str(), batchStr.length() + 1, MPI_BYTE, dest, 0,
 					         MPI_COMM_WORLD);
 				}
