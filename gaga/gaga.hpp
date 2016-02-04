@@ -17,6 +17,19 @@
 #ifndef GAMULTI_HPP
 #define GAMULTI_HPP
 
+/****************************************
+ *       TO ENABLE PARALLELISATION
+ * *************************************/
+// before including this file,
+// #define OMP if you want OpenMP parallelisation
+// #define CLUSTER if you want MPI parralelisation
+#ifdef CLUSTER
+#include <mpi.h>
+#endif
+#ifdef OMP
+#include <omp.h>
+#endif
+
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <assert.h>
@@ -32,19 +45,6 @@
 #include <map>
 #include <string>
 #include "json/json.hpp"
-
-/****************************************
- *       TO ENABLE PARALLELISATION
- * *************************************/
-// before including this file,
-// #define OMP if you want OpenMP parallelisation
-// #define CLUSTER if you want MPI parralelisation
-#ifdef OMP
-#include <omp.h>
-#endif
-#ifdef CLUSTER
-#include <mpi.h>
-#endif
 
 #define PURPLE "\033[1;35m"
 #define BLUE "\033[34m"
@@ -81,6 +81,7 @@ using std::chrono::system_clock;
 // 1 - the Individual class template : an individual's generic representation, with its
 // dna, fitnesses and
 // behavior footprints (for novelty)
+
 // 2 - the main GA class template
 //
 // About parallelisation :
@@ -341,13 +342,13 @@ template <typename DNA, typename Evaluator> class GA {
 				cerr << "population size = " << population.size() << endl;
 			}
 
-#ifdef OMP
-			omp_lock_t statsLock;
-			omp_init_lock(&statsLock);
 			int nbAlreadyEvaluated = 0;
 			for (const auto &p : population) {
 				if (p.evaluated) ++nbAlreadyEvaluated;
 			}
+#ifdef OMP
+			omp_lock_t statsLock;
+			omp_init_lock(&statsLock);
 #pragma omp parallel for schedule(dynamic, 1)
 #endif
 			for (size_t i = 0; i < population.size(); ++i) {
