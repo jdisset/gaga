@@ -314,11 +314,9 @@ template <typename DNA, typename Evaluator> class GA {
 						batch.push_back(population.back());
 						population.pop_back();
 					}
-					std::ostringstream batchOSS;
-					batchOSS << Individual<DNA>::popToJSON(batch);
-					string batchStr = batchOSS.str();
-					MPI_Send(batchStr.c_str(), batchStr.length() + 1, MPI_BYTE, dest, 0,
-					         MPI_COMM_WORLD);
+					auto batchStr = Individual<DNA>::popToJSON(batch).dump().c_str();
+					auto msgSize = std::strlen(batchStr) + 1;
+					MPI_Send(batchStr, msgSize, MPI_BYTE, dest, 0, MPI_COMM_WORLD);
 				}
 			} else {
 				// we're in a slave process, we welcome our local population !
@@ -438,10 +436,9 @@ template <typename DNA, typename Evaluator> class GA {
 			}
 #ifdef CLUSTER
 			if (procId != 0) {  // if slave process we send our population to our mighty leader
-				std::ostringstream batchOSS;
-				batchOSS << Individual<DNA>::popToJSON(population);
-				string batchStr = batchOSS.str();
-				MPI_Send(batchStr.c_str(), batchStr.length() + 1, MPI_BYTE, 0, 0, MPI_COMM_WORLD);
+				auto batchStr = Individual<DNA>::popToJSON(population).dump().c_str();
+				auto msgSize = std::strlen(batchStr) + 1;
+				MPI_Send(batchStr, msgSize, MPI_BYTE, 0, 0, MPI_COMM_WORLD);
 			} else {
 				// master process receives all other batches
 				for (unsigned int source = 1; source < (unsigned int)nbProcs; ++source) {
