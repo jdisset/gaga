@@ -341,7 +341,7 @@ template <typename DNA, typename Evaluator> class GA {
 
 #ifdef OMP
 			omp_lock_t statsLock;
-			omp_init_lock(&statsLock);
+			omp_init_lock(&statsLock); // mutex for stats
 			int nbAlreadyEvaluated = 0;
 			for (const auto &p : population) {
 				if (p.evaluated) ++nbAlreadyEvaluated;
