@@ -17,6 +17,19 @@
 #ifndef GAMULTI_HPP
 #define GAMULTI_HPP
 
+/****************************************
+ *       TO ENABLE PARALLELISATION
+ * *************************************/
+// before including this file,
+// #define OMP if you want OpenMP parallelisation
+// #define CLUSTER if you want MPI parralelisation
+#ifdef CLUSTER
+#include <mpi.h>
+#endif
+#ifdef OMP
+#include <omp.h>
+#endif
+
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <assert.h>
@@ -32,19 +45,6 @@
 #include <map>
 #include <string>
 #include "json/json.hpp"
-
-/****************************************
- *       TO ENABLE PARALLELISATION
- * *************************************/
-// before including this file,
-// #define OMP if you want OpenMP parallelisation
-// #define CLUSTER if you want MPI parralelisation
-#ifdef OMP
-#include <omp.h>
-#endif
-#ifdef CLUSTER
-#include <mpi.h>
-#endif
 
 #define PURPLE "\033[1;35m"
 #define BLUE "\033[34m"
@@ -81,6 +81,7 @@ using std::chrono::system_clock;
 // 1 - the Individual class template : an individual's generic representation, with its
 // dna, fitnesses and
 // behavior footprints (for novelty)
+
 // 2 - the main GA class template
 //
 // About parallelisation :
@@ -109,7 +110,8 @@ template <typename DNA> struct Individual {
 
 	explicit Individual(const json &o) {
 		assert(o.count("dna"));
-		dna = DNA(o.at("dna"));
+		string dnaStr = o.at("dna");
+		dna = DNA(dnaStr);
 		if (o.count("footprint")) {
 			json fp(o.at("footprint"));
 			for (auto &fCol : fp) {
@@ -253,8 +255,8 @@ template <typename DNA, typename Evaluator> class GA {
 	vector<Individual<DNA>> population;
 	unsigned int currentGeneration = 0;
 	// openmp/mpi stuff
-	unsigned int procId = 0;
-	unsigned int nbProcs = 1;
+	int procId = 0;
+	int nbProcs = 1;
 	int argc = 1;
 	char **argv = nullptr;
 
@@ -272,7 +274,7 @@ template <typename DNA, typename Evaluator> class GA {
 		MPI_Comm_size(MPI_COMM_WORLD, &nbProcs);
 		MPI_Comm_rank(MPI_COMM_WORLD, &procId);
 		if (procId == 0) {
-			if (verbosity >= = 3) {
+			if (verbosity >= 3) {
 				cerr << "   -------------------" << endl;
 				cerr << CYAN << " MPI STARTED WITH " << NORMAL << nbProcs << CYAN << " PROCS "
 				     << NORMAL << endl;
@@ -307,14 +309,14 @@ template <typename DNA, typename Evaluator> class GA {
 				// master will have the remaining
 				unsigned int batchSize = population.size() / nbProcs;
 				for (unsigned int dest = 1; dest < (unsigned int)nbProcs; ++dest) {
-					std::vector<Individual<DNA>> batch;
+					vector<Individual<DNA>> batch;
 					for (size_t ind = 0; ind < batchSize; ++ind) {
 						batch.push_back(population.back());
 						population.pop_back();
 					}
 					std::ostringstream batchOSS;
 					batchOSS << Individual<DNA>::popToJSON(batch);
-					std::string batchStr = batchOSS.str();
+					string batchStr = batchOSS.str();
 					MPI_Send(batchStr.c_str(), batchStr.length() + 1, MPI_BYTE, dest, 0,
 					         MPI_COMM_WORLD);
 				}
@@ -327,7 +329,7 @@ template <typename DNA, typename Evaluator> class GA {
 				char *popChar = new char[strLength + 1];
 				MPI_Recv(popChar, strLength, MPI_BYTE, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 				// and we dejsonize !
-				auto o = json::Parse(popChar);
+				auto o = json::parse(popChar);
 				population = Individual<DNA>::loadPopFromJSON(o);  // welcome bros!
 				if (verbosity >= 3) {
 					cerr << endl
@@ -340,13 +342,13 @@ template <typename DNA, typename Evaluator> class GA {
 				cerr << "population size = " << population.size() << endl;
 			}
 
-#ifdef OMP
-			omp_lock_t statsLock;
-			omp_init_lock(&statsLock); // mutex for stats
 			int nbAlreadyEvaluated = 0;
 			for (const auto &p : population) {
 				if (p.evaluated) ++nbAlreadyEvaluated;
 			}
+#ifdef OMP
+			omp_lock_t statsLock;
+			omp_init_lock(&statsLock);
 #pragma omp parallel for schedule(dynamic, 1)
 #endif
 			for (size_t i = 0; i < population.size(); ++i) {
@@ -436,7 +438,7 @@ template <typename DNA, typename Evaluator> class GA {
 			}
 #ifdef CLUSTER
 			if (procId != 0) {  // if slave process we send our population to our mighty leader
-				ostringstream batchOSS;
+				std::ostringstream batchOSS;
 				batchOSS << Individual<DNA>::popToJSON(population);
 				string batchStr = batchOSS.str();
 				MPI_Send(batchStr.c_str(), batchStr.length() + 1, MPI_BYTE, 0, 0, MPI_COMM_WORLD);
@@ -567,7 +569,7 @@ template <typename DNA, typename Evaluator> class GA {
 				          << " competitors) for obj " << o.first << std::endl;
 			}
 			while (nextGen.size() < popGoal) {
-				std::vector<Individual<DNA> *> tournament;
+				vector<Individual<DNA> *> tournament;
 				tournament.resize(tournamentSize);
 				for (unsigned int i = 0; i < tournamentSize; ++i) {
 					int selected = dint(globalRand);
