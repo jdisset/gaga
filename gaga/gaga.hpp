@@ -111,18 +111,17 @@ template <typename DNA> struct Individual {
 
 	explicit Individual(const json &o) {
 		assert(o.count("dna"));
-		string dnaStr = o.at("dna");
-		dna = DNA(dnaStr);
+		dna = DNA(o.at("dna").dump());
 		if (o.count("footprint")) {
 			json fp(o.at("footprint"));
 			for (auto &fCol : fp) {
-				vector<double> fc;
+				vector<double> realFp;
 				for (string f : fCol) {
 					double val;
 					sscanf(f.c_str(), "%lf", &val);
-					fc.push_back(val);
+					realFp.push_back(val);
 				}
-				footprint.push_back(fp);
+				footprint.push_back(realFp);
 			}
 		}
 		if (o.count("fitnesses")) {
@@ -276,11 +275,11 @@ template <typename DNA, typename Evaluator> class GA {
 		MPI_Comm_rank(MPI_COMM_WORLD, &procId);
 		if (procId == 0) {
 			if (verbosity >= 3) {
-				cerr << "   -------------------" << endl;
-				cerr << CYAN << " MPI STARTED WITH " << NORMAL << nbProcs << CYAN << " PROCS "
+				cout << "   -------------------" << endl;
+				cout << CYAN << " MPI STARTED WITH " << NORMAL << nbProcs << CYAN << " PROCS "
 				     << NORMAL << endl;
-				cerr << "   -------------------" << endl;
-				cerr << "Initialising population in master process" << endl;
+				cout << "   -------------------" << endl;
+				cout << "Initialising population in master process" << endl;
 			}
 #endif
 #ifdef CLUSTER
@@ -299,9 +298,15 @@ template <typename DNA, typename Evaluator> class GA {
 		}
 		createFolder(folder);
 		bool finished = false;
+#ifndef CLUSTER
 		if (verbosity >= 1) {
 			printStart();
 		}
+#else
+		if (procId == 0 && verbosity >= 1) {
+			printStart();
+		}
+#endif
 		while (!finished) {
 			auto tg0 = high_resolution_clock::now();
 #ifdef CLUSTER
@@ -317,7 +322,7 @@ template <typename DNA, typename Evaluator> class GA {
 					}
 					string batchStr = Individual<DNA>::popToJSON(batch).dump();
 					std::vector<char> tmp(batchStr.begin(), batchStr.end());
-					tmp.push_back( '\0' );
+					tmp.push_back('\0');
 					MPI_Send(tmp.data(), tmp.size(), MPI_BYTE, dest, 0, MPI_COMM_WORLD);
 				}
 			} else {
@@ -332,14 +337,16 @@ template <typename DNA, typename Evaluator> class GA {
 				auto o = json::parse(popChar);
 				population = Individual<DNA>::loadPopFromJSON(o);  // welcome bros!
 				if (verbosity >= 3) {
-					cerr << endl
-					     << "Proc " << procId << " : reception of " << population.size()
-					     << " new individuals !" << endl;
+					std::ostringstream buf;
+					buf << endl
+					    << "Proc " << PURPLE << procId << NORMAL << " : reception of "
+					    << population.size() << " new individuals !" << endl;
+					cout << buf.str();
 				}
 			}
 #endif
 			if (verbosity >= 3) {
-				cerr << "population size = " << population.size() << endl;
+				cout << "Population size = " << population.size() << endl;
 			}
 
 			int nbAlreadyEvaluated = 0;
@@ -358,13 +365,15 @@ template <typename DNA, typename Evaluator> class GA {
 				if (population[i].evaluated) {
 					if (verbosity >= 3) {
 						std::stringstream msg;
-						msg << "-◇- Ind " << i << " already evaluated" << std::endl;
+						msg << GREY << "-◇-" << NORMAL << " Ind " << i << " already evaluated "
+						    << std::endl;
 						std::cout << msg.str();
 					}
 				} else {
 					if (verbosity >= 3) {
 						std::stringstream msg;
-						msg << "-◇- Evaluation starting for ind " << i << std::endl;
+						msg << GREY << "-◇-" << NORMAL << " Evaluation starting for ind " << i
+						    << std::endl;
 						std::cout << msg.str();
 					}
 
@@ -373,10 +382,11 @@ template <typename DNA, typename Evaluator> class GA {
 					auto t1 = high_resolution_clock::now();
 					population[i].evaluated = true;
 					if (verbosity >= 3) {
-						indStatus << "-◇- Evaluation ended for ind " << i << std::endl;
+						indStatus << GREY << "-◇-" << NORMAL << " Evaluation ended for ind " << i
+						          << std::endl;
 						if (novelty) {
-							indStatus << " 👣  Footprint : "
-							          << footprintToString(population[i].footprint) << std::endl;
+							indStatus << " ❯ " << footprintToString(population[i].footprint)
+							          << std::endl;
 						}
 					}
 					totalTime = std::chrono::duration<double>(t1 - t0).count();
@@ -405,27 +415,32 @@ template <typename DNA, typename Evaluator> class GA {
 					}
 				}
 				if (verbosity >= 1) {
-					indStatus << CYANBOLD << "✷ " << NORMAL << "(" << PURPLE << procId << NORMAL
+					indStatus << endl
+					          << CYANBOLD << "✷ " << NORMAL << "(" << PURPLE << procId << NORMAL
 					          << ") ➳    Ind " << YELLOW << std::setw(3) << i << NORMAL
 					          << " evaluated in " GREEN << std::setw(3) << std::setprecision(1)
-					          << std::fixed << totalTime << NORMAL << "s" << std::endl;
+					          << std::fixed << totalTime << "s." NORMAL;
 					if (verbosity >= 4) {
 						indStatus << " Ind " << i << "'s dna = " << population[i].dna.toJSON()
 						          << std::endl;
 					}
 					for (auto &o : population[i].fitnesses) {
-						indStatus << " " << o.first << " : ";
-						if (best.count(o.first)) {
-							indStatus << CYANBOLD;
-						} else {
-							indStatus << GREEN;
+						if (o.first != "novelty") {
+							indStatus << GREY << " ❯ " << NORMAL << o.first << " : ";
+							if (best.count(o.first)) {
+								indStatus << CYANBOLD;
+							} else {
+								indStatus << BLUE;
+							}
+							double val = o.second;
+							indStatus << val << GREY << " ❙ " << NORMAL;
 						}
-						double val = o.second;
-						indStatus << val << NORMAL << ";";
 					}
-					if (best.size() > 0) {
+					if (best.size() > 0 && population[i].footprint.size() > 0 &&
+					    (best.size() > 1 || !best.count("novelty"))) {
 						indStatus << endl;
-						indStatus << GA<DNA, Evaluator>::footprintToString(population[i].footprint);
+						indStatus << GREY << "❯" << NORMAL
+						          << GA<DNA, Evaluator>::footprintToString(population[i].footprint);
 						indStatus << endl;
 					}
 					if (verbosity >= 2) {
@@ -440,7 +455,7 @@ template <typename DNA, typename Evaluator> class GA {
 			if (procId != 0) {  // if slave process we send our population to our mighty leader
 				string batchStr = Individual<DNA>::popToJSON(population).dump();
 				std::vector<char> tmp(batchStr.begin(), batchStr.end());
-				tmp.push_back( '\0' );
+				tmp.push_back('\0');
 				MPI_Send(tmp.data(), tmp.size(), MPI_BYTE, 0, 0, MPI_COMM_WORLD);
 			} else {
 				// master process receives all other batches
@@ -456,6 +471,7 @@ template <typename DNA, typename Evaluator> class GA {
 					auto o = json::parse(popChar);
 					vector<Individual<DNA>> batch = Individual<DNA>::loadPopFromJSON(o);
 					population.insert(population.end(), batch.begin(), batch.end());
+					delete popChar;
 					if (verbosity >= 3) {
 						cout << endl
 						     << "Proc " << procId << " : reception of " << batch.size()
@@ -727,15 +743,9 @@ template <typename DNA, typename Evaluator> class GA {
 	}
 
 	// panpan cucul
-	static string footprintToString(const vector<vector<double>> &f) {
+	static inline string footprintToString(const vector<vector<double>> &f) {
 		std::ostringstream res;
-		for (auto &p : f) {
-			res << NORMAL << "     [" << GREY;
-			for (const double &v : p) {
-				res << " " << std::setw(4) << std::setprecision(3) << std::fixed << v;
-			}
-			res << NORMAL << " ]" << endl;
-		}
+		res << "👣  " << json(f).dump();
 		return res.str();
 	}
 
@@ -799,6 +809,13 @@ template <typename DNA, typename Evaluator> class GA {
 	}
 
 	void updateNovelty() {
+		if (verbosity >= 2) {
+			cout << endl << endl;
+			std::stringstream output;
+			cout << GREY << " ❯❯  " << YELLOW << "COMPUTING NOVELTY " << NORMAL << " ⤵  "
+			     << endl
+			     << endl;
+		}
 		auto savedArchiveSize = archive.size();
 		for (auto &ind : population) {
 			archive.push_back({ind.footprint, 1});
@@ -813,10 +830,11 @@ template <typename DNA, typename Evaluator> class GA {
 			}
 			if (verbosity >= 2) {
 				std::stringstream output;
-				output << "[ " << footprintToString(ind.footprint) << "] novelty = " << CYAN
-				       << avgD << NORMAL
-				       << (added ? "(added to archive)" : "(too low for archive)") << endl;
-				std::cout << output.str() << std::endl;
+				output << GREY << " ❯ " << BLUE << footprintToString(ind.footprint) << NORMAL
+				       << ". Novelty = " << CYAN << avgD << GREY
+				       << (added ? " (added to archive)" : " (too low for archive)") << NORMAL
+				       << endl;
+				std::cout << output.str();
 			}
 			ind.fitnesses["novelty"] = avgD;
 			if (stats[currentGeneration].count("novelty") == 0) {
@@ -827,10 +845,6 @@ template <typename DNA, typename Evaluator> class GA {
 			stats[currentGeneration]["novelty"]["avg"] += ind.fitnesses.at("novelty");
 			if (avgD > stats[currentGeneration]["novelty"]["max"]) {  // new best
 				stats[currentGeneration]["novelty"]["max"] = avgD;      // new best
-				if (verbosity >= 2) {
-					cout << " New best novelty: " << CYAN << avgD << NORMAL << endl;
-					cout << footprintToString(ind.footprint);
-				}
 			}
 		}
 		if (currentGeneration > 0) {
