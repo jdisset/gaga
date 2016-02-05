@@ -416,10 +416,10 @@ template <typename DNA, typename Evaluator> class GA {
 				}
 				if (verbosity >= 1) {
 					indStatus << endl
-					          << CYANBOLD << "✷ " << NORMAL << "(" << PURPLE << procId << NORMAL
-					          << ") ➳    Ind " << YELLOW << std::setw(3) << i << NORMAL
-					          << " evaluated in " GREEN << std::setw(3) << std::setprecision(1)
-					          << std::fixed << totalTime << "s." NORMAL;
+					          << BLUE << "✓ " << GREY << "[" << PURPLE << procId << GREY << "]"
+					          << NORMAL << " ➤  Ind " << YELLOW << std::setw(3) << i << NORMAL
+					          << ",  🕝  " GREEN << std::setw(3) << std::setprecision(1)
+					          << std::fixed << totalTime << "s" NORMAL;
 					if (verbosity >= 4) {
 						indStatus << " Ind " << i << "'s dna = " << population[i].dna.toJSON()
 						          << std::endl;
@@ -732,6 +732,8 @@ template <typename DNA, typename Evaluator> class GA {
 			assert(knn.size() == k);
 			double divisor = 0;
 			for (size_t i = 0; i < knn.size(); ++i) {
+				cerr << "fp = " << footprintToString(fp) << ", knnDist = " << knnDist[i]
+				     << ", fpd = " << getFootprintDistance(fp, knn[i].first) << endl;
 				assert(getFootprintDistance(fp, knn[i].first) == knnDist[i]);
 				avgDist += knnDist[i] * static_cast<double>(knn[i].second);
 				divisor += knn[i].second;
@@ -868,7 +870,8 @@ template <typename DNA, typename Evaluator> class GA {
 		std::cout << std::endl;
 		std::cout << YELLOW << "              ☀     " << NORMAL << " Starting GAGA " << YELLOW
 		          << "    ☀ " << NORMAL;
-		std::cout << std::endl << GREY;
+		std::cout << std::endl;
+		std::cout << BLUE << "                      ¯\\_ಠ ᴥ ಠ_/¯" << std::endl << GREY;
 		for (int i = 0; i < nbCol - 1; ++i) std::cout << "┄";
 		std::cout << std::endl << NORMAL;
 		std::cout << "  ▹ population size = " << BLUE << popSize << NORMAL << std::endl;
