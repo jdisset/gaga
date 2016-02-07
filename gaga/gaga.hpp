@@ -68,8 +68,7 @@ using std::unordered_map;
 using std::cout;
 using std::cerr;
 using std::endl;
-using fpType = std::vector<std::vector<double>>;          // footprints for novelty
-using archType = std::vector<std::pair<fpType, double>>;  // collection of footprints
+using fpType = std::vector<std::vector<double>>;  // footprints for novelty
 using json = nlohmann::json;
 using std::chrono::high_resolution_clock;
 using std::chrono::milliseconds;
@@ -105,8 +104,10 @@ template <typename DNA> struct Individual {
 	DNA dna;
 	map<string, double> fitnesses;  // map {"fitnessCriterName" -> "fitnessValue"}
 	fpType footprint;               // individual's footprint for novelty computation
+	string infos;                   // custom infos, description, whatever...
 	bool evaluated = false;
 
+	Individual() {}
 	explicit Individual(const DNA &d) : dna(d) {}
 
 	explicit Individual(const json &o) {
@@ -132,6 +133,9 @@ template <typename DNA> struct Individual {
 				fitnesses[it.key()] = val;
 			}
 		}
+		if (o.count("infos")) {
+			infos = o.at("infos");
+		}
 	}
 
 	// Exports individual to json
@@ -156,6 +160,7 @@ template <typename DNA> struct Individual {
 		o["dna"] = json::parse(dna.toJSON());
 		o["fitnesses"] = fitObject;
 		o["footprint"] = fpstr;
+		o["infos"] = infos;
 		return o;
 	}
 
@@ -212,12 +217,14 @@ template <typename DNA, typename Evaluator> class GA {
 	unsigned int tournamentSize = 3;  // nb of competitors in tournament
 	unsigned int nbGen = 500;         // nb of generations
 	double minNoveltyForArchive =
-	    0.0002;                     // min novelty for being added to the general archive
-	unsigned int KNN = 10;          // size of the neighbourhood for novelty
-	unsigned int saveInterval = 1;  // interval between 2 whole population saves
-	string folder = "../evos/";     // where to save the results
-	double crossoverProba = 0.2;    // crossover probability
-	double mutationProba = 0.5;     // mutation probablility
+	    0.0002;                      // min novelty for being added to the general archive
+	unsigned int KNN = 10;           // size of the neighbourhood for novelty
+	bool savePopEnabled = true;      // save the whole population?
+	bool saveArchiveEnabled = true;  // save the novelty archive?
+	unsigned int saveInterval = 1;   // interval between 2 whole population saves
+	string folder = "../evos/";      // where to save the results
+	double crossoverProba = 0.2;     // crossover probability
+	double mutationProba = 0.5;      // mutation probablility
 	unordered_map<string, double>
 	    proportions;  // {{"baseObj", 0.25}, {"novelty", 0.75}};  // fitness weight
 	                  // proportions contains the relative weights of the objectives
@@ -229,6 +236,10 @@ template <typename DNA, typename Evaluator> class GA {
  public:
 	void enableNovelty() { novelty = true; }
 	void disableNovelty() { novelty = false; }
+	void enablePopulationSave() { savePopEnabled = true; }
+	void disablePopulationSave() { savePopEnabled = false; }
+	void enableArchiveSave() { saveArchiveEnabled = true; }
+	void disableArchiveSave() { saveArchiveEnabled = false; }
 	void setVerbosity(unsigned int lvl) { verbosity = lvl <= 3 ? (lvl >= 0 ? lvl : 0) : 3; }
 	void setPopSize(unsigned int s) { popSize = s; }
 	void setNbElites(unsigned int n) { nbElites = n; }
@@ -251,7 +262,8 @@ template <typename DNA, typename Evaluator> class GA {
 
  protected:
 	Evaluator evaluate;
-	archType archive;  // where we store behaviors footprints for novelty
+	vector<Individual<DNA>>
+	    archive;  // when novelty is enabled, we store the novel individuals there
 	vector<Individual<DNA>> population;
 	unsigned int currentGeneration = 0;
 	// openmp/mpi stuff
@@ -444,6 +456,11 @@ template <typename DNA, typename Evaluator> class GA {
 						indStatus << endl;
 					}
 					if (verbosity >= 2) {
+						if (population[i].infos.size() > 0) {
+							indStatus << endl
+							          << "Associated infos: " << endl
+							          << population[i].infos << endl;
+						}
 						cout << indStatus.str();
 					}
 				}
@@ -494,7 +511,10 @@ template <typename DNA, typename Evaluator> class GA {
 					printGenerationStats(nbAlreadyEvaluated);
 				}
 				// we save everybody
-				if (currentGeneration % saveInterval == 0) savePop();
+				if (currentGeneration % saveInterval == 0) {
+					if (savePopEnabled) savePop();
+					if (novelty && saveArchiveEnabled) saveArchive();
+				}
 				saveBests(nbSavedElites);
 				saveStats();
 				// and prepare the next gen
@@ -698,48 +718,45 @@ template <typename DNA, typename Evaluator> class GA {
 	// computeAvgDist (novelty related)
 	// returns the average distance of a footprint fp to its k nearest neighbours
 	// in an archive of footprints
-	static double computeAvgDist(unsigned int k, const archType &arch, const fpType &fp) {
+	static double computeAvgDist(unsigned int K, const vector<Individual<DNA>> &arch,
+	                             const fpType &fp) {
 		double avgDist = 0;
-		if (arch.size() > k) {
-			archType knn;
+		if (arch.size() > 1) {
+			unsigned int k = arch.size() < K ? arch.size() : K;
+			vector<Individual<DNA>> knn;
 			knn.reserve(k);
 			vector<double> knnDist;
 			knnDist.reserve(k);
-			std::pair<double, size_t> maxKnn = {getFootprintDistance(fp, arch[0].first),
-			                                    0};  // maxKnn is the worst among the knn
+			std::pair<double, size_t> worstKnn = {getFootprintDistance(fp, arch[0].footprint),
+			                                      0};  // maxKnn is the worst among the knn
 			for (unsigned int i = 0; i < k; ++i) {
 				knn.push_back(arch[i]);
-				double d = getFootprintDistance(fp, arch[i].first);
+				double d = getFootprintDistance(fp, arch[i].footprint);
 				knnDist.push_back(d);
-				if (d > maxKnn.first) {
-					maxKnn = {d, i};
+				if (d > worstKnn.first) {
+					worstKnn = {d, i};
 				}
 			}
 			for (size_t i = k; i < arch.size(); ++i) {
-				double d = getFootprintDistance(fp, arch[i].first);
-				if (d < maxKnn.first) {
-					knn[maxKnn.second] = arch[i];
-					knnDist[maxKnn.second] = d;
-					maxKnn.first = d;
-					// then we update maxKnn
+				double d = getFootprintDistance(fp, arch[i].footprint);
+				if (d < worstKnn.first) {  // this one is closer than our worst knn
+					knn[worstKnn.second] = arch[i];
+					knnDist[worstKnn.second] = d;
+					worstKnn.first = d;
+					// we update maxKnn
 					for (size_t j = 0; j < knn.size(); ++j) {
-						if (knnDist[j] > maxKnn.first) {
-							maxKnn = {knnDist[j], j};
+						if (knnDist[j] > worstKnn.first) {
+							worstKnn = {knnDist[j], j};
 						}
 					}
 				}
 			}
 			assert(knn.size() == k);
-			double divisor = 0;
 			for (size_t i = 0; i < knn.size(); ++i) {
-				cerr << "fp = " << footprintToString(fp) << ", knnDist = " << knnDist[i]
-				     << ", fpd = " << getFootprintDistance(fp, knn[i].first) << endl;
-				assert(getFootprintDistance(fp, knn[i].first) == knnDist[i]);
-				avgDist += knnDist[i] * static_cast<double>(knn[i].second);
-				divisor += knn[i].second;
+				assert(getFootprintDistance(fp, knn[i].footprint) == knnDist[i]);
+				avgDist += knnDist[i];
 			}
-			assert(divisor > 0);
-			avgDist /= divisor;
+			avgDist /= static_cast<double>(knn.size());
 		}
 		return avgDist;
 	}
@@ -820,14 +837,14 @@ template <typename DNA, typename Evaluator> class GA {
 		}
 		auto savedArchiveSize = archive.size();
 		for (auto &ind : population) {
-			archive.push_back({ind.footprint, 1});
+			archive.push_back(ind);
 		}
-		archType toBeAdded;
+		vector<Individual<DNA>> toBeAdded;
 		for (auto &ind : population) {
 			double avgD = computeAvgDist(KNN, archive, ind.footprint);
 			bool added = false;
 			if (avgD > minNoveltyForArchive) {
-				toBeAdded.push_back({ind.footprint, 1});
+				toBeAdded.push_back(ind);
 				added = true;
 			}
 			if (verbosity >= 2) {
@@ -1028,7 +1045,20 @@ template <typename DNA, typename Evaluator> class GA {
 		fileName << baseName.str() << "/pop" << currentGeneration << ".pop";
 		std::ofstream file;
 		file.open(fileName.str());
-		file << o.dump();
+		file << o.dump(2);
+		file.close();
+	}
+	void saveArchive() {
+		json o = Individual<DNA>::popToJSON(archive);
+		o["evaluator"] = evaluate.name;
+		std::stringstream baseName;
+		baseName << folder << "/gen" << currentGeneration;
+		mkdir(baseName.str().c_str(), 0777);
+		std::stringstream fileName;
+		fileName << baseName.str() << "/archive" << currentGeneration << ".pop";
+		std::ofstream file;
+		file.open(fileName.str());
+		file << o.dump(2);
 		file.close();
 	}
 };
