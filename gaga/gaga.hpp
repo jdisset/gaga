@@ -849,10 +849,13 @@ template <typename DNA, typename Evaluator> class GA {
 			}
 			if (verbosity >= 2) {
 				std::stringstream output;
-				output << GREY << " ❯ " << BLUE << footprintToString(ind.footprint) << NORMAL
-				       << ". Novelty = " << CYAN << avgD << GREY
-				       << (added ? " (added to archive)" : " (too low for archive)") << NORMAL
-				       << endl;
+				output << GREY << " ❯ " << endl
+				       << NORMAL << ind.infos << endl
+				       << " -> Novelty = " << CYAN << avgD << GREY
+				       << (added ? " (added to archive)" : " (too low for archive)") << NORMAL;
+				if (verbosity >= 3)
+					output << "Footprint was : " << footprintToString(ind.footprint);
+				output << endl;
 				std::cout << output.str();
 			}
 			ind.fitnesses["novelty"] = avgD;
