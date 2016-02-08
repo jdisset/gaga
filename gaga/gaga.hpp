@@ -217,8 +217,8 @@ template <typename DNA, typename Evaluator> class GA {
 	unsigned int tournamentSize = 3;  // nb of competitors in tournament
 	unsigned int nbGen = 500;         // nb of generations
 	double minNoveltyForArchive =
-	    0.0002;                      // min novelty for being added to the general archive
-	unsigned int KNN = 10;           // size of the neighbourhood for novelty
+	    0.01;                        // min novelty for being added to the general archive
+	unsigned int KNN = 15;           // size of the neighbourhood for novelty
 	bool savePopEnabled = true;      // save the whole population?
 	bool saveArchiveEnabled = true;  // save the novelty archive?
 	unsigned int saveInterval = 1;   // interval between 2 whole population saves
@@ -255,6 +255,7 @@ template <typename DNA, typename Evaluator> class GA {
 	void setMutationProba(double p) {
 		mutationProba = p <= 1.0 ? (p >= 0.0 ? p : 0.0) : 1.0;
 	}
+	void setMinNoveltyForArchive(double m) { minNoveltyForArchive = m; }
 	void setObjectivesDistribution(map<string, double> d) { proportions = d; }
 	void setObjectivesDistribution(string o, double d) { proportions[o] = d; }
 
@@ -712,7 +713,7 @@ template <typename DNA, typename Evaluator> class GA {
 				d += std::pow(f0[i][j] - f1[i][j], 2);
 			}
 		}
-		return sqrt(d);
+		return d;
 	}
 
 	// computeAvgDist (novelty related)
@@ -839,6 +840,7 @@ template <typename DNA, typename Evaluator> class GA {
 		for (auto &ind : population) {
 			archive.push_back(ind);
 		}
+		std::pair<Individual<DNA> *, double> best = {&population[0], 0};
 		vector<Individual<DNA>> toBeAdded;
 		for (auto &ind : population) {
 			double avgD = computeAvgDist(KNN, archive, ind.footprint);
@@ -847,6 +849,7 @@ template <typename DNA, typename Evaluator> class GA {
 				toBeAdded.push_back(ind);
 				added = true;
 			}
+			if (avgD > best.second) best = {&ind, avgD};
 			if (verbosity >= 2) {
 				std::stringstream output;
 				output << GREY << " ❯ " << endl
@@ -880,6 +883,12 @@ template <typename DNA, typename Evaluator> class GA {
 				       << ")." << std::endl;
 				std::cout << output.str() << std::endl;
 			}
+		}
+		if (verbosity >= 2) {
+			std::stringstream output;
+			output << "Most novel individual (novelty = " << best.second
+			       << "): " << best.first->infos << endl;
+			cout << output.str();
 		}
 	}
 
