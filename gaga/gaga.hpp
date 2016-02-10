@@ -117,10 +117,8 @@ template <typename DNA> struct Individual {
 			json fp(o.at("footprint"));
 			for (auto &fCol : fp) {
 				vector<double> realFp;
-				for (string f : fCol) {
-					double val;
-					sscanf(f.c_str(), "%lf", &val);
-					realFp.push_back(val);
+				for (auto f : fCol) {
+					realFp.push_back(f.get<double>());
 				}
 				footprint.push_back(realFp);
 			}
@@ -128,9 +126,7 @@ template <typename DNA> struct Individual {
 		if (o.count("fitnesses")) {
 			json fitObj = o.at("fitnesses");
 			for (json::iterator it = fitObj.begin(); it != fitObj.end(); ++it) {
-				double val;
-				sscanf(it.value().get<string>().c_str(), "%lf", &val);
-				fitnesses[it.key()] = val;
+				fitnesses[it.key()] = it.value().get<double>();
 			}
 		}
 		if (o.count("infos")) {
@@ -140,26 +136,10 @@ template <typename DNA> struct Individual {
 
 	// Exports individual to json
 	json toJSON() const {
-		json fitObject;
-		for (auto &f : fitnesses) {
-			char buf[50];
-			snprintf(buf, sizeof(buf), "%a", f.second);
-			fitObject[f.first] = buf;
-		}
-		vector<vector<string>> fpstr;
-		for (auto &f0 : footprint) {
-			vector<string> f;
-			for (auto &f1 : f0) {
-				char buf[50];
-				snprintf(buf, sizeof(buf), "%a", f1);
-				f.push_back(buf);
-			}
-			fpstr.push_back(f);
-		}
 		json o;
 		o["dna"] = json::parse(dna.toJSON());
-		o["fitnesses"] = fitObject;
-		o["footprint"] = fpstr;
+		o["fitnesses"] = fitnesses;
+		o["footprint"] = footprint;
 		o["infos"] = infos;
 		return o;
 	}
