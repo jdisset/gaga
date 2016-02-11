@@ -196,15 +196,14 @@ template <typename DNA, typename Evaluator> class GA {
 	unsigned int nbSavedElites = 1;   // nb of elites to save
 	unsigned int tournamentSize = 3;  // nb of competitors in tournament
 	unsigned int nbGen = 500;         // nb of generations
-	double minNoveltyForArchive =
-	    0.01;                        // min novelty for being added to the general archive
-	unsigned int KNN = 15;           // size of the neighbourhood for novelty
-	bool savePopEnabled = true;      // save the whole population?
-	bool saveArchiveEnabled = true;  // save the novelty archive?
-	unsigned int saveInterval = 1;   // interval between 2 whole population saves
-	string folder = "../evos/";      // where to save the results
-	double crossoverProba = 0.2;     // crossover probability
-	double mutationProba = 0.5;      // mutation probablility
+	double minNoveltyForArchive = 1;  // min novelty for being added to the general archive
+	unsigned int KNN = 15;            // size of the neighbourhood for novelty
+	bool savePopEnabled = true;       // save the whole population?
+	bool saveArchiveEnabled = true;   // save the novelty archive?
+	unsigned int saveInterval = 1;    // interval between 2 whole population saves
+	string folder = "../evos/";       // where to save the results
+	double crossoverProba = 0.2;      // crossover probability
+	double mutationProba = 0.5;       // mutation probablility
 	unordered_map<string, double>
 	    proportions;  // {{"baseObj", 0.25}, {"novelty", 0.75}};  // fitness weight
 	                  // proportions contains the relative weights of the objectives
@@ -437,7 +436,7 @@ template <typename DNA, typename Evaluator> class GA {
 						indStatus << endl;
 					}
 					if (verbosity >= 2) {
-						if (population[i].infos.size() > 0) {
+						if (population[i].infos.size() > 0 && verbosity >= 3) {
 							indStatus << endl
 							          << "Associated infos: " << endl
 							          << population[i].infos << endl;
@@ -693,7 +692,7 @@ template <typename DNA, typename Evaluator> class GA {
 				d += std::pow(f0[i][j] - f1[i][j], 2);
 			}
 		}
-		return d;
+		return sqrt(d);
 	}
 
 	// computeAvgDist (novelty related)
@@ -852,17 +851,15 @@ template <typename DNA, typename Evaluator> class GA {
 				stats[currentGeneration]["novelty"]["max"] = avgD;      // new best
 			}
 		}
-		if (currentGeneration > 0) {
-			archive.resize(savedArchiveSize);
-			archive.insert(std::end(archive), std::begin(toBeAdded), std::end(toBeAdded));
-			if (verbosity >= 2) {
-				std::stringstream output;
-				output << " Added " << toBeAdded.size() << " new footprints to the archive."
-				       << std::endl
-				       << "New archive size = " << archive.size() << " (was " << savedArchiveSize
-				       << ")." << std::endl;
-				std::cout << output.str() << std::endl;
-			}
+		archive.resize(savedArchiveSize);
+		archive.insert(std::end(archive), std::begin(toBeAdded), std::end(toBeAdded));
+		if (verbosity >= 2) {
+			std::stringstream output;
+			output << " Added " << toBeAdded.size() << " new footprints to the archive."
+			       << std::endl
+			       << "New archive size = " << archive.size() << " (was " << savedArchiveSize
+			       << ")." << std::endl;
+			std::cout << output.str() << std::endl;
 		}
 		if (verbosity >= 2) {
 			std::stringstream output;
@@ -1037,7 +1034,7 @@ template <typename DNA, typename Evaluator> class GA {
 		fileName << baseName.str() << "/pop" << currentGeneration << ".pop";
 		std::ofstream file;
 		file.open(fileName.str());
-		file << o.dump(2);
+		file << o.dump();
 		file.close();
 	}
 	void saveArchive() {
@@ -1050,7 +1047,7 @@ template <typename DNA, typename Evaluator> class GA {
 		fileName << baseName.str() << "/archive" << currentGeneration << ".pop";
 		std::ofstream file;
 		file.open(fileName.str());
-		file << o.dump(2);
+		file << o.dump();
 		file.close();
 	}
 };
