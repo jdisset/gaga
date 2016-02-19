@@ -436,7 +436,8 @@ template <typename DNA, typename Evaluator> class GA {
 						indStatus << endl;
 					}
 					if (verbosity >= 2) {
-						if (population[i].infos.size() > 0 && verbosity >= 3) {
+						if (population[i].infos.size() > 0 &&
+						    (population[i].footprint.size() == 0 || verbosity >= 3)) {
 							indStatus << endl
 							          << "Associated infos: " << endl
 							          << population[i].infos << endl;
@@ -526,7 +527,8 @@ template <typename DNA, typename Evaluator> class GA {
 		if (verbosity >= 3) {
 			std::cout << BLUE << "The objectives are" << NORMAL;
 			for (auto &s : objectives) {
-				std::cout << std::endl << " * " << s;
+				std::cout << std::endl
+				          << " * " << s;
 			}
 			std::cout << std::endl;
 		}
@@ -809,7 +811,8 @@ template <typename DNA, typename Evaluator> class GA {
 
 	void updateNovelty() {
 		if (verbosity >= 2) {
-			cout << endl << endl;
+			cout << endl
+			     << endl;
 			std::stringstream output;
 			cout << GREY << " ❯❯  " << YELLOW << "COMPUTING NOVELTY " << NORMAL << " ⤵  "
 			     << endl
@@ -871,15 +874,18 @@ template <typename DNA, typename Evaluator> class GA {
 
 	void printStart() {
 		int nbCol = 55;
-		std::cout << std::endl << GREY;
+		std::cout << std::endl
+		          << GREY;
 		for (int i = 0; i < nbCol - 1; ++i) std::cout << "━";
 		std::cout << std::endl;
 		std::cout << YELLOW << "              ☀     " << NORMAL << " Starting GAGA " << YELLOW
 		          << "    ☀ " << NORMAL;
 		std::cout << std::endl;
-		std::cout << BLUE << "                      ¯\\_ಠ ᴥ ಠ_/¯" << std::endl << GREY;
+		std::cout << BLUE << "                      ¯\\_ಠ ᴥ ಠ_/¯" << std::endl
+		          << GREY;
 		for (int i = 0; i < nbCol - 1; ++i) std::cout << "┄";
-		std::cout << std::endl << NORMAL;
+		std::cout << std::endl
+		          << NORMAL;
 		std::cout << "  ▹ population size = " << BLUE << popSize << NORMAL << std::endl;
 		std::cout << "  ▹ nb of elites = " << BLUE << nbElites << NORMAL << std::endl;
 		std::cout << "  ▹ nb of tournament competitors = " << BLUE << tournamentSize << NORMAL
@@ -909,7 +915,8 @@ template <typename DNA, typename Evaluator> class GA {
 #endif
 		std::cout << GREY;
 		for (int i = 0; i < nbCol - 1; ++i) std::cout << "━";
-		std::cout << std::endl << NORMAL;
+		std::cout << std::endl
+		          << NORMAL;
 	}
 
 	void printCentered(unsigned int totalCol, const string &s) {
