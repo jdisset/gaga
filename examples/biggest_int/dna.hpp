@@ -14,6 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public
 // License along with this library.
 #include <random>
+#include <string>
 #include "../../gaga/json/json.hpp"
 
 /***********************************
@@ -34,8 +35,9 @@ public:
 	 *                MANDATORY METHODS
 	 *******************************************************/
 
-	// A valid dna must be able to be constructed from a json object
-	explicit IntDNA(const json &o) {
+	// A valid dna must be able to be constructed from a json string
+	explicit IntDNA(const std::string &js) {
+		auto o = json::parse(js);
 		value1 = o["value1"];
 		value2 = o["value2"];
 	}
@@ -63,12 +65,12 @@ public:
 	// A reset method (just to cleanup things before a new evaluation)
 	void reset() {}
 
-	// And a method that returns a json object
-	nlohmann::json toJSON() const {
+	// And a method that returns a json string
+	std::string toJSON() const {
 		json o;
 		o["value1"] = value1;
 		o["value2"] = value2;
-		return o;
+		return o.dump();
 	}
 	/*******************************************************/
 
