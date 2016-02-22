@@ -47,11 +47,16 @@
 #include <string>
 #include "json/json.hpp"
 
-#define PURPLE "\033[1;35m"
+#define PURPLE "\033[35m"
+#define PURPLEBOLD "\033[1;35m"
 #define BLUE "\033[34m"
-#define GREY "\033[1;30m"
-#define YELLOW "\033[1;33m"
-#define RED "\033[1;31m"
+#define BLUEBOLD "\033[1;34m"
+#define GREY "\033[30m"
+#define GREYBOLD "\033[1;30m"
+#define YELLOW "\033[33m"
+#define YELLOWBOLD "\033[1;33m"
+#define RED "\033[31m"
+#define REDBOLD "\033[1;31m"
 #define CYAN "\033[36m"
 #define CYANBOLD "\033[1;36m"
 #define GREEN "\033[32m"
@@ -106,6 +111,8 @@ template <typename DNA> struct Individual {
 	fpType footprint;               // individual's footprint for novelty computation
 	string infos;                   // custom infos, description, whatever...
 	bool evaluated = false;
+	bool wasAlreadyEvaluated = false;
+	double evalTime = 0.0;
 
 	Individual() {}
 	explicit Individual(const DNA &d) : dna(d) {}
@@ -113,25 +120,12 @@ template <typename DNA> struct Individual {
 	explicit Individual(const json &o) {
 		assert(o.count("dna"));
 		dna = DNA(o.at("dna").dump());
-		if (o.count("footprint")) {
-			json fp(o.at("footprint"));
-			for (auto &fCol : fp) {
-				vector<double> realFp;
-				for (auto f : fCol) {
-					realFp.push_back(f.get<double>());
-				}
-				footprint.push_back(realFp);
-			}
-		}
-		if (o.count("fitnesses")) {
-			json fitObj = o.at("fitnesses");
-			for (json::iterator it = fitObj.begin(); it != fitObj.end(); ++it) {
-				fitnesses[it.key()] = it.value().get<double>();
-			}
-		}
-		if (o.count("infos")) {
-			infos = o.at("infos");
-		}
+		if (o.count("footprint")) footprint = o.at("footprint").get<fpType>();
+		if (o.count("fitnesses")) fitnesses = o.at("fitnesses").get<decltype(fitnesses)>();
+		if (o.count("infos")) infos = o.at("infos");
+		if (o.count("evaluated")) evaluated = o.at("evaluated");
+		if (o.count("alreadyEval")) wasAlreadyEvaluated = o.at("alreadyEval");
+		if (o.count("evalTime")) evalTime = o.at("evalTime");
 	}
 
 	// Exports individual to json
@@ -141,6 +135,9 @@ template <typename DNA> struct Individual {
 		o["fitnesses"] = fitnesses;
 		o["footprint"] = footprint;
 		o["infos"] = infos;
+		o["evaluated"] = evaluated;
+		o["alreadyEval"] = wasAlreadyEvaluated;
+		o["evalTime"] = evalTime;
 		return o;
 	}
 
@@ -148,9 +145,7 @@ template <typename DNA> struct Individual {
 	static json popToJSON(const vector<Individual<DNA>> &p) {
 		json o;
 		json popArray;
-		for (auto &i : p) {
-			popArray.push_back(i.toJSON());
-		}
+		for (auto &i : p) popArray.push_back(i.toJSON());
 		o["population"] = popArray;
 		return o;
 	}
@@ -160,9 +155,7 @@ template <typename DNA> struct Individual {
 		assert(o.count("population"));
 		vector<Individual<DNA>> res;
 		json popArray = o.at("population");
-		for (auto &ind : popArray) {
-			res.push_back(Individual<DNA>(ind));
-		}
+		for (auto &ind : popArray) res.push_back(Individual<DNA>(ind));
 		return res;
 	}
 };
@@ -252,9 +245,12 @@ template <typename DNA, typename Evaluator> class GA {
 	int argc = 1;
 	char **argv = nullptr;
 
-	vector<unordered_map<string, unordered_map<string, double>>> stats;  // fitnesses stats
+	std::vector<std::map<std::string, std::map<std::string, double>>> genStats;
+
 	std::default_random_engine globalRand = std::default_random_engine(
 	    std::chrono::system_clock::now().time_since_epoch().count());
+
+	bool isBetter(double a, double b) { return a > b; }  // comparison btwn 2 fitnesses
 
  public:
 	/*********************************************************************************
@@ -273,8 +269,6 @@ template <typename DNA, typename Evaluator> class GA {
 				cout << "   -------------------" << endl;
 				cout << "Initialising population in master process" << endl;
 			}
-#endif
-#ifdef CLUSTER
 		}
 #endif
 	}
@@ -284,388 +278,226 @@ template <typename DNA, typename Evaluator> class GA {
 	 ********************************************************************************/
 	// "Vroum vroum"
 	int start() {
+		bool finished = false;
+		population.reserve(popSize);
 		for (unsigned int i = 0; i < popSize; ++i) {
 			population.push_back(Individual<DNA>(DNA::random(argc, argv)));
 			population[population.size() - 1].evaluated = false;
 		}
-		createFolder(folder);
-		bool finished = false;
-#ifndef CLUSTER
-		if (verbosity >= 1) {
-			printStart();
+		if (procId == 0) {
+			createFolder(folder);
+			if (verbosity >= 1) printStart();
 		}
-#else
-		if (procId == 0 && verbosity >= 1) {
-			printStart();
-		}
-#endif
 		while (!finished) {
 			auto tg0 = high_resolution_clock::now();
 #ifdef CLUSTER
-			if (procId == 0) {
-				// if we're in the master process, we send b(i)atches to the others.
-				// master will have the remaining
-				unsigned int batchSize = population.size() / nbProcs;
-				for (unsigned int dest = 1; dest < (unsigned int)nbProcs; ++dest) {
-					vector<Individual<DNA>> batch;
-					for (size_t ind = 0; ind < batchSize; ++ind) {
-						batch.push_back(population.back());
-						population.pop_back();
-					}
-					string batchStr = Individual<DNA>::popToJSON(batch).dump();
-					std::vector<char> tmp(batchStr.begin(), batchStr.end());
-					tmp.push_back('\0');
-					MPI_Send(tmp.data(), tmp.size(), MPI_BYTE, dest, 0, MPI_COMM_WORLD);
-				}
-			} else {
-				// we're in a slave process, we welcome our local population !
-				int strLength;
-				MPI_Status status;
-				MPI_Probe(0, 0, MPI_COMM_WORLD, &status);  // we want to know its size
-				MPI_Get_count(&status, MPI_CHAR, &strLength);
-				char *popChar = new char[strLength + 1];
-				MPI_Recv(popChar, strLength, MPI_BYTE, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-				// and we dejsonize !
-				auto o = json::parse(popChar);
-				population = Individual<DNA>::loadPopFromJSON(o);  // welcome bros!
-				if (verbosity >= 3) {
-					std::ostringstream buf;
-					buf << endl
-					    << "Proc " << PURPLE << procId << NORMAL << " : reception of "
-					    << population.size() << " new individuals !" << endl;
-					cout << buf.str();
-				}
-			}
+			MPI_distributePopulation();
 #endif
-			if (verbosity >= 3) {
-				cout << "Population size = " << population.size() << endl;
-			}
-
-			int nbAlreadyEvaluated = 0;
-			for (const auto &p : population) {
-				if (p.evaluated) ++nbAlreadyEvaluated;
-			}
 #ifdef OMP
-			omp_lock_t statsLock;
-			omp_init_lock(&statsLock);
-#pragma omp parallel for schedule(dynamic, 1)
+#pragma omp parallel for schedule(dynamic, 2)
 #endif
 			for (size_t i = 0; i < population.size(); ++i) {
-				population[i].dna.reset();
-				double totalTime = 0.0;
-				std::ostringstream indStatus;
-				if (population[i].evaluated) {
-					if (verbosity >= 3) {
-						std::stringstream msg;
-						msg << GREY << "-◇-" << NORMAL << " Ind " << i << " already evaluated "
-						    << std::endl;
-						std::cout << msg.str();
-					}
-				} else {
-					if (verbosity >= 3) {
-						std::stringstream msg;
-						msg << GREY << "-◇-" << NORMAL << " Evaluation starting for ind " << i
-						    << std::endl;
-						std::cout << msg.str();
-					}
-
+				if (!population[i].evaluated) {
 					auto t0 = high_resolution_clock::now();
+					population[i].dna.reset();
 					evaluate(population[i]);
 					auto t1 = high_resolution_clock::now();
 					population[i].evaluated = true;
-					if (verbosity >= 3) {
-						indStatus << GREY << "-◇-" << NORMAL << " Evaluation ended for ind " << i
-						          << std::endl;
-						if (novelty) {
-							indStatus << " ❯ " << footprintToString(population[i].footprint)
-							          << std::endl;
-						}
-					}
-					totalTime = std::chrono::duration<double>(t1 - t0).count();
+					double indTime = std::chrono::duration<double>(t1 - t0).count();
+					population[i].evalTime = indTime;
+					population[i].wasAlreadyEvaluated = false;
+				} else {
+					population[i].evalTime = 0.0;
+					population[i].wasAlreadyEvaluated = true;
 				}
-				// STATS:
-				unordered_set<string> best;
-#ifdef OMP
-				omp_set_lock(&statsLock);
-#endif
-				while (stats.size() <= currentGeneration) {
-					stats.push_back(unordered_map<string, unordered_map<string, double>>());
-				}
-				for (auto &o : population[i].fitnesses) {
-					if (!stats[currentGeneration].count(o.first)) {
-						stats[currentGeneration][o.first]["max"] = -1e30;
-						stats[currentGeneration][o.first]["min"] = 1e30;
-						stats[currentGeneration][o.first]["avg"] = 0;
-					}
-					stats[currentGeneration][o.first]["avg"] += o.second;
-					if (o.second > stats[currentGeneration][o.first]["max"]) {  // new best
-						best.insert(o.first);
-						stats[currentGeneration][o.first]["max"] = o.second;
-					}
-					if (o.second < stats[currentGeneration][o.first]["min"]) {
-						stats[currentGeneration][o.first]["min"] = o.second;
-					}
-				}
-				if (verbosity >= 1) {
-					indStatus << endl
-					          << BLUE << "✓ " << GREY << "[" << PURPLE << procId << GREY << "]"
-					          << NORMAL << " ➤  Ind " << YELLOW << std::setw(3) << i << NORMAL
-					          << ",  🕝  " GREEN << std::setw(3) << std::setprecision(1)
-					          << std::fixed << totalTime << "s" NORMAL;
-					if (verbosity >= 4) {
-						indStatus << " Ind " << i << "'s dna = " << population[i].dna.toJSON()
-						          << std::endl;
-					}
-					for (auto &o : population[i].fitnesses) {
-						if (o.first != "novelty") {
-							indStatus << GREY << " ❯ " << NORMAL << o.first << " : ";
-							if (best.count(o.first)) {
-								indStatus << CYANBOLD;
-							} else {
-								indStatus << BLUE;
-							}
-							double val = o.second;
-							indStatus << val << GREY << " ❙ " << NORMAL;
-						}
-					}
-					if (best.size() > 0 && population[i].footprint.size() > 0 &&
-					    (best.size() > 1 || !best.count("novelty"))) {
-						indStatus << endl;
-						indStatus << GREY << "❯" << NORMAL
-						          << GA<DNA, Evaluator>::footprintToString(population[i].footprint);
-						indStatus << endl;
-					}
-					if (verbosity >= 2) {
-						if (population[i].infos.size() > 0 &&
-						    (population[i].footprint.size() == 0 || verbosity >= 3)) {
-							indStatus << endl
-							          << "Associated infos: " << endl
-							          << population[i].infos << endl;
-						}
-						cout << indStatus.str();
-					}
-				}
-#ifdef OMP
-				omp_unset_lock(&statsLock);
-#endif
+				if (verbosity >= 2) printIndividualStats(population[i]);
 			}
 #ifdef CLUSTER
-			if (procId != 0) {  // if slave process we send our population to our mighty leader
-				string batchStr = Individual<DNA>::popToJSON(population).dump();
-				std::vector<char> tmp(batchStr.begin(), batchStr.end());
-				tmp.push_back('\0');
-				MPI_Send(tmp.data(), tmp.size(), MPI_BYTE, 0, 0, MPI_COMM_WORLD);
-			} else {
-				// master process receives all other batches
-				for (unsigned int source = 1; source < (unsigned int)nbProcs; ++source) {
-					int strLength;
-					MPI_Status status;
-					MPI_Probe(source, 0, MPI_COMM_WORLD, &status);  // determining batch size
-					MPI_Get_count(&status, MPI_CHAR, &strLength);
-					char *popChar = new char[strLength + 1];
-					MPI_Recv(popChar, strLength + 1, MPI_BYTE, source, 0, MPI_COMM_WORLD,
-					         MPI_STATUS_IGNORE);
-					// and we dejsonize!
-					auto o = json::parse(popChar);
-					vector<Individual<DNA>> batch = Individual<DNA>::loadPopFromJSON(o);
-					population.insert(population.end(), batch.begin(), batch.end());
-					delete popChar;
-					if (verbosity >= 3) {
-						cout << endl
-						     << "Proc " << procId << " : reception of " << batch.size()
-						     << " treated individuals from proc " << source << endl;
-					}
-				}
+			MPI_receivePopulation();
 #endif
-				// the end of a generation
-				// now we update novelty
-				if (novelty) {
-					updateNovelty();
-				}
+			if (procId == 0) {
+				if (novelty) updateNovelty();
 				auto tg1 = high_resolution_clock::now();
 				double totalTime = std::chrono::duration<double>(tg1 - tg0).count();
-				stats[currentGeneration]["global"]["time"] = totalTime;
-				for (auto &o : stats[currentGeneration]) {
-					o.second["avg"] /= static_cast<double>(population.size());
-				}
-				if (verbosity >= 1) {
-					printGenerationStats(nbAlreadyEvaluated);
-				}
-				// we save everybody
+				updateStats(totalTime);
 				if (currentGeneration % saveInterval == 0) {
 					if (savePopEnabled) savePop();
 					if (novelty && saveArchiveEnabled) saveArchive();
 				}
+				if (verbosity >= 1) printGenStats(currentGeneration);
 				saveBests(nbSavedElites);
 				saveStats();
-				// and prepare the next gen
 				prepareNextPop();
 				finished = (currentGeneration++ >= nbGen);
-#ifdef CLUSTER
 			}
-#endif
 		}
 #ifdef CLUSTER
 		MPI_Finalize();
 #endif
 		return 0;
 	}
+
+// MPI specifics
+#ifdef CLUSTER
+	void MPI_distributePopulation() {
+		if (procId == 0) {
+			// if we're in the master process, we send b(i)atches to the others.
+			// master will have the remaining
+			unsigned int batchSize = population.size() / nbProcs;
+			for (unsigned int dest = 1; dest < (unsigned int)nbProcs; ++dest) {
+				vector<Individual<DNA>> batch;
+				for (size_t ind = 0; ind < batchSize; ++ind) {
+					batch.push_back(population.back());
+					population.pop_back();
+				}
+				string batchStr = Individual<DNA>::popToJSON(batch).dump();
+				std::vector<char> tmp(batchStr.begin(), batchStr.end());
+				tmp.push_back('\0');
+				MPI_Send(tmp.data(), tmp.size(), MPI_BYTE, dest, 0, MPI_COMM_WORLD);
+			}
+		} else {
+			// we're in a slave process, we welcome our local population !
+			int strLength;
+			MPI_Status status;
+			MPI_Probe(0, 0, MPI_COMM_WORLD, &status);  // we want to know its size
+			MPI_Get_count(&status, MPI_CHAR, &strLength);
+			char *popChar = new char[strLength + 1];
+			MPI_Recv(popChar, strLength, MPI_BYTE, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+			// and we dejsonize !
+			auto o = json::parse(popChar);
+			population = Individual<DNA>::loadPopFromJSON(o);  // welcome bros!
+			if (verbosity >= 3) {
+				std::ostringstream buf;
+				buf << endl
+				    << "Proc " << PURPLE << procId << NORMAL << " : reception of "
+				    << population.size() << " new individuals !" << endl;
+				cout << buf.str();
+			}
+		}
+	}
+
+	void MPI_receivePopulation() {
+		if (procId != 0) {  // if slave process we send our population to our mighty leader
+			string batchStr = Individual<DNA>::popToJSON(population).dump();
+			std::vector<char> tmp(batchStr.begin(), batchStr.end());
+			tmp.push_back('\0');
+			MPI_Send(tmp.data(), tmp.size(), MPI_BYTE, 0, 0, MPI_COMM_WORLD);
+		} else {
+			// master process receives all other batches
+			for (unsigned int source = 1; source < (unsigned int)nbProcs; ++source) {
+				int strLength;
+				MPI_Status status;
+				MPI_Probe(source, 0, MPI_COMM_WORLD, &status);  // determining batch size
+				MPI_Get_count(&status, MPI_CHAR, &strLength);
+				char *popChar = new char[strLength + 1];
+				MPI_Recv(popChar, strLength + 1, MPI_BYTE, source, 0, MPI_COMM_WORLD,
+				         MPI_STATUS_IGNORE);
+				// and we dejsonize!
+				auto o = json::parse(popChar);
+				vector<Individual<DNA>> batch = Individual<DNA>::loadPopFromJSON(o);
+				population.insert(population.end(), batch.begin(), batch.end());
+				delete popChar;
+				if (verbosity >= 3) {
+					cout << endl
+					     << "Proc " << procId << " : reception of " << batch.size()
+					     << " treated individuals from proc " << source << endl;
+				}
+			}
+		}
+	}
+#endif
 	/*********************************************************************************
 	 *                            NEXT POP GETTING READY
 	 ********************************************************************************/
 	// Là où qu'on fait les bébés.
 	void prepareNextPop() {
-		std::uniform_real_distribution<double> d(0.0, 1.0);
-		if (verbosity >= 3) {
-			cerr << "-◇- copying elites" << endl;
-		}
+		assert(population.size() > 0);
+		assert(population.size() == popSize);
+		// simplest MO
 		vector<Individual<DNA>> nextGen;
-		vector<string> objectives;
-		for (auto &o : population[0].fitnesses) {
-			objectives.push_back(o.first);  // we need to know what the objectives are
+		nextGen.reserve(popSize);
+		vector<string> obj;
+		for (auto &o : population[0].fitnesses) obj.push_back(o.first);
+		size_t division = population.size() / obj.size();
+		size_t remaining = population.size() % obj.size();
+		for (size_t i = 0; i < obj.size(); ++i) {
+			size_t extra = i < remaining ? 1 : 0;
+			auto subpop = classicTournament(obj[i], division + extra);
+			nextGen.insert(nextGen.end(), subpop.begin(), subpop.end());
 		}
-		if (verbosity >= 3) {
-			std::cout << BLUE << "The objectives are" << NORMAL;
-			for (auto &s : objectives) {
-				std::cout << std::endl
-				          << " * " << s;
-			}
-			std::cout << std::endl;
-		}
-		map<string, vector<Individual<DNA>>> elites = getElites(objectives, nbElites);
-		// we put the elites in the nextGen
-		for (auto &e : elites) {
-			for (auto &i : e.second) {
-				nextGen.push_back(i);
-			}
-		}
-		unsigned int firstNonEliteIndex = nextGen.size();
-		if (verbosity >= 3) {
-			cerr << "firstNonEliteIndex = " << firstNonEliteIndex << endl;
-		}
-		// now we can start the tournament
-		std::uniform_int_distribution<int> dint(0, population.size() - 1);
-		if (verbosity >= 3) {
-			cerr << "-◇- starting tournaments" << endl;
-		}
-		// we need to know how much of each objective's representatives we will have
-		// if the proportion map has been set, we use it. Else we split equally
-		unordered_map<string, double> objPop;  // nb of ind per objective
-		double sum = 0;  // we need to be sure these proportions are normalized
-		for (auto &o : objectives) {
-			if (proportions.count(o) > 0) {
-				objPop[o] = proportions.at(o);
-			} else {
-				objPop[o] = 1.0 / static_cast<double>(objectives.size());
-			}
-			sum += objPop.at(o);
-		}
-		int availableSpots = population.size() - nextGen.size();
-		int cpt = 0;
-		int id = 0;
-		for (auto &o : objPop) {
-			o.second /= sum;  // normalization
-			if (id++ < static_cast<int>(objPop.size() - 1)) {
-				o.second = static_cast<int>(o.second * static_cast<double>(availableSpots));
-				cpt += o.second;
-			} else {  // if it's the last objective, we fill up the rest
-				o.second = availableSpots - cpt;
-			}
-		}
-		if (verbosity >= 3) {
-			std::cout << "Population target per objectives after normalization: " << std::endl;
-			for (auto &op : objPop) {
-				std::cout << " * " << op.first << " = " << op.second << std::endl;
-			}
-		}
-
-		for (auto &o : objPop) {
-			unsigned int popGoal = nextGen.size() + static_cast<unsigned int>(o.second);
-
-			if (verbosity >= 3) {
-				std::cout << "Starting tournaments (" << tournamentSize
-				          << " competitors) for obj " << o.first << std::endl;
-			}
-			while (nextGen.size() < popGoal) {
-				vector<Individual<DNA> *> tournament;
-				tournament.resize(tournamentSize);
-				for (unsigned int i = 0; i < tournamentSize; ++i) {
-					int selected = dint(globalRand);
-					if (verbosity >= 3) {
-						std::cout << GREY << "Selected ind " << selected << " with fitness " << NORMAL
-						          << population[selected].fitnesses.at(o.first) << std::endl;
-					}
-					tournament[i] = &population[selected];
-				}
-				Individual<DNA> *winner = tournament[0];
-				for (unsigned int i = 1; i < tournamentSize; ++i) {
-					assert(tournament[i]->fitnesses.count(o.first));
-					if (tournament[i]->fitnesses.at(o.first) > winner->fitnesses.at(o.first)) {
-						winner = tournament[i];
-					}
-				}
-				auto winnerclone = *winner;
-				if (verbosity >= 3) {
-					std::cout << "Winner's fitness = " << winnerclone.fitnesses.at(o.first)
-					          << std::endl;
-				}
-				if (d(globalRand) <= mutationProba) {  // mutation
-					winnerclone.dna.mutate();
-					winnerclone.evaluated = false;
-					if (verbosity >= 3) {
-						std::cout << GREEN << "Winner has mutated" << NORMAL << std::endl;
-					}
-				}
-				nextGen.push_back(winnerclone);
-			}
-		}
-		if (verbosity >= 3) {
-			cerr << "-◇- crossovers" << endl;
-		}
-		population.clear();
-		for (unsigned int pi = 0; pi < nextGen.size(); ++pi) {
-			auto &p1 = nextGen[pi];
-			if (pi >= firstNonEliteIndex && d(globalRand) < crossoverProba) {
-				unsigned int r = dint(globalRand);
-				const Individual<DNA> &p2 = nextGen[r];
-				if (verbosity >= 3) {
-					std::cerr << "crossing ind " << BLUE << pi << NORMAL << " with ind " << YELLOW
-					          << r << NORMAL << std::endl;
-				}
-				population.push_back(Individual<DNA>(p1.dna.crossover(p2.dna)));
-				population[population.size() - 1].evaluated = false;
-			} else {
-				population.push_back(p1);
-			}
-		}
+		assert(nextGen.size() == popSize);
+		population = nextGen;
 	}
 
-	map<string, vector<Individual<DNA>>> getElites(const vector<string> &obj, int n) {
+	vector<Individual<DNA>> classicTournament(const std::string &objName, size_t n) {
+		std::uniform_real_distribution<double> d(0.0, 1.0);
+		assert(n > nbElites);
+		vector<Individual<DNA>> newPop;
+		newPop.reserve(n);
+		// grab elites & add them to newPop
+		auto elites = getElites({{objName}}, nbElites);
+		for (auto &e : elites) {
+			for (auto &i : e.second) {
+				newPop.push_back(i);
+			}
+		}
+		while (newPop.size() < n) {
+			// choose 2 parents
+			std::uniform_int_distribution<int> dint(0, population.size() - 1);
+			std::vector<int> t0, t1;
+			assert(tournamentSize > 0);
+			for (unsigned int i = 0; i < tournamentSize; ++i) {
+				t0.push_back(dint(globalRand));
+				t1.push_back(dint(globalRand));
+			}
+			Individual<DNA> *p0 = &population[t0[0]];
+			Individual<DNA> *p1 = &population[t1[0]];
+			for (unsigned int i = 0; i < tournamentSize; ++i) {
+				if (isBetter(population[t0[i]].fitnesses.at(objName), p0->fitnesses.at(objName)))
+					p0 = &population[t0[i]];
+				if (isBetter(population[t1[i]].fitnesses.at(objName), p1->fitnesses.at(objName)))
+					p1 = &population[t1[i]];
+			}
+			Individual<DNA> offspring;
+			// create 1 offspring or simply copy one parent
+			if (d(globalRand) < crossoverProba) {
+				offspring = Individual<DNA>(p0->dna.crossover(p1->dna));
+				offspring.evaluated = false;
+			} else {
+				offspring = *p0;
+			}
+			// mutate offspring
+			if (d(globalRand) < mutationProba) {
+				offspring.dna.mutate();
+				offspring.evaluated = false;
+			}
+			newPop.push_back(offspring);
+		}
+		assert(newPop.size() == n);
+		return newPop;
+	}
+
+	unordered_map<string, vector<Individual<DNA>>> getElites(const vector<string> &obj,
+	                                                         size_t n) {
 		if (verbosity >= 3) {
 			cerr << "getElites : nbObj = " << obj.size() << " n = " << n << endl;
 		}
-		map<string, vector<Individual<DNA>>> elites;
+		unordered_map<string, vector<Individual<DNA>>> elites;
 		for (auto &o : obj) {
 			elites[o] = vector<Individual<DNA>>();
-			for (auto &i : population) {
-				if (static_cast<int>(elites.at(o).size()) < n) {
-					// we push the first inds without looking at their fitness
-					elites.at(o).push_back(i);
-				} else {
-					// but if we already have enough elites we need to check if the one we have
-					// really are the best (and replace them if they're not)
-					auto worst = elites.at(o).begin();
-					auto worstScore = worst->fitnesses.at(o);
-					// first we find the worst individual we have saved until now
-					for (auto j = elites.at(o).begin(); j != elites.at(o).end(); ++j) {
-						if (worstScore > j->fitnesses.at(o)) {
-							worstScore = j->fitnesses.at(o);
+			elites[o].push_back(population[0]);
+			size_t worst = 0;
+			for (size_t i = 1; i < n && i < population.size(); ++i) {
+				elites[o].push_back(population[i]);
+				if (isBetter(elites[o][worst].fitnesses.at(o), population[i].fitnesses.at(o)))
+					worst = i;
+			}
+			for (size_t i = n; i < population.size(); ++i) {
+				if (isBetter(population[i].fitnesses.at(o), elites[o][worst].fitnesses.at(o))) {
+					elites[o][worst] = population[i];
+					for (size_t j = 0; j < n; ++j) {
+						if (isBetter(elites[o][worst].fitnesses.at(o), elites[o][j].fitnesses.at(o)))
 							worst = j;
-						}
-					}
-					// then we replace it if our candidate is better
-					if (worstScore < i.fitnesses.at(o)) {
-						*worst = i;
 					}
 				}
 			}
@@ -742,73 +574,6 @@ template <typename DNA, typename Evaluator> class GA {
 		}
 		return avgDist;
 	}
-
-	// panpan cucul
-	static inline string footprintToString(const vector<vector<double>> &f) {
-		std::ostringstream res;
-		res << "👣  " << json(f).dump();
-		return res.str();
-	}
-
-	/*********************************************************************************
-	 *                           PRINT & LOG HELPERS
-	 ********************************************************************************/
-	void printGenerationStats(int nbAlreadyEvaluated) {
-		int totalCol = 77;
-		std::stringstream buf;
-		cout << endl;
-		buf << "GENERATION " << currentGeneration;
-		cout << endl
-		     << GREY << "+" << std::setfill('-') << std::setw(totalCol) << "-"
-		     << "+" << NORMAL << endl;
-		cout << GREY << "|" << std::setfill(' ') << std::setw(totalCol) << " "
-		     << "|" << NORMAL << endl;
-		cout << GREY << "|" << GREENBOLD;
-		printCentered(totalCol, buf.str());
-		cout << GREY << "|" << NORMAL << endl;
-		cout << GREY << "|" << std::setfill(' ') << std::setw(totalCol) << " "
-		     << "|" << NORMAL << endl;
-		cout << GREY << "|" << std::setfill(' ') << std::setw(totalCol) << " "
-		     << "|" << NORMAL << endl;
-		buf = std::stringstream();
-		buf << PURPLE << population.size() - nbAlreadyEvaluated << NORMAL
-		    << " evaluations in " << BLUE << stats[currentGeneration]["global"]["time"]
-		    << NORMAL << "s";
-		cout << GREY << "|";
-		printCentered(totalCol, buf.str());
-		cout << GREY << "|" << NORMAL << endl;
-		cout << "+" << std::setfill('-') << std::setw(totalCol) << "-"
-		     << "+" << endl;
-
-		int nCol = totalCol - 2;
-		cout << GREY << "|" << CYAN;
-		printCentered(nCol / 3, "Obj name");
-		cout << GREY << "|" << CYAN;
-		printCentered(nCol / 3, "Best");
-		cout << GREY << "|" << CYAN;
-		printCentered(nCol / 3, "Avg");
-		cout << GREY << "|" << NORMAL << endl;
-		cout << GREY << "+" << std::setfill('-') << std::setw(totalCol) << "-"
-		     << "+" << NORMAL << endl;
-		for (auto &o : stats[currentGeneration]) {
-			if (o.first != "global") {
-				cout << GREY << "|" << GREEN;
-				printCentered(nCol / 3, o.first);
-				cout << GREY << "|" << NORMAL;
-				buf = std::stringstream();
-				buf << o.second["max"];
-				printCentered(nCol / 3, buf.str());
-				cout << GREY << "|" << NORMAL;
-				buf = std::stringstream();
-				buf << o.second["avg"];
-				printCentered(nCol / 3, buf.str());
-				cout << GREY << "|" << NORMAL << endl;
-				cout << GREY << "+" << std::setfill('-') << std::setw(totalCol) << "-"
-				     << "+" << NORMAL << endl;
-			}
-		}
-	}
-
 	void updateNovelty() {
 		if (verbosity >= 2) {
 			cout << endl
@@ -844,15 +609,6 @@ template <typename DNA, typename Evaluator> class GA {
 				std::cout << output.str();
 			}
 			ind.fitnesses["novelty"] = avgD;
-			if (stats[currentGeneration].count("novelty") == 0) {
-				stats[currentGeneration]["novelty"]["max"] = -1e30;
-				stats[currentGeneration]["novelty"]["min"] = 1e30;
-				stats[currentGeneration]["novelty"]["avg"] = 0;
-			}
-			stats[currentGeneration]["novelty"]["avg"] += ind.fitnesses.at("novelty");
-			if (avgD > stats[currentGeneration]["novelty"]["max"]) {  // new best
-				stats[currentGeneration]["novelty"]["max"] = avgD;      // new best
-			}
 		}
 		archive.resize(savedArchiveSize);
 		archive.insert(std::end(archive), std::begin(toBeAdded), std::end(toBeAdded));
@@ -872,6 +628,16 @@ template <typename DNA, typename Evaluator> class GA {
 		}
 	}
 
+	// panpan cucul
+	static inline string footprintToString(const vector<vector<double>> &f) {
+		std::ostringstream res;
+		res << "👣  " << json(f).dump();
+		return res.str();
+	}
+
+	/*********************************************************************************
+	 *                           STATS, LOGS & PRINTING
+	 ********************************************************************************/
 	void printStart() {
 		int nbCol = 55;
 		std::cout << std::endl
@@ -918,12 +684,136 @@ template <typename DNA, typename Evaluator> class GA {
 		std::cout << std::endl
 		          << NORMAL;
 	}
+	void updateStats(double totalTime) {
+		// stats organisations :
+		// "global" -> {"genTotalTime", "indTotalTime", "maxTime", "nEvals", "nObjs"}
+		// "obj_i" -> {"avg", "worst", "best"}
+		assert(population.size());
+		std::map<std::string, std::map<std::string, double>> currentGenStats;
+		currentGenStats["global"]["genTotalTime"] = totalTime;
+		double indTotalTime = 0.0, maxTime = 0.0;
+		int nEvals = 0;
+		int nObjs = population[0].fitnesses.size();
+		for (const auto &o : population[0].fitnesses) {
+			currentGenStats[o.first] = {
+			    {{"avg", 0.0}, {"worst", o.second}, {"best", o.second}}};
+		}
+		for (const auto &ind : population) {
+			indTotalTime += ind.evalTime;
+			for (const auto &o : ind.fitnesses) {
+				currentGenStats[o.first].at("avg") +=
+				    (o.second / static_cast<double>(population.size()));
+				if (isBetter(o.second, currentGenStats[o.first].at("best")))
+					currentGenStats[o.first].at("best") = o.second;
+				if (!isBetter(o.second, currentGenStats[o.first].at("worst")))
+					currentGenStats[o.first].at("worst") = o.second;
+			}
+			if (ind.evalTime > maxTime) maxTime = ind.evalTime;
+			if (!ind.wasAlreadyEvaluated) ++nEvals;
+		}
+		currentGenStats["global"]["indTotalTime"] = indTotalTime;
+		currentGenStats["global"]["maxTime"] = maxTime;
+		currentGenStats["global"]["nEvals"] = nEvals;
+		currentGenStats["global"]["nObjs"] = nObjs;
+		genStats.push_back(currentGenStats);
+	}
 
-	void printCentered(unsigned int totalCol, const string &s) {
-		int halfFree = (totalCol - s.size()) / 2;
-		int c = 2 * halfFree + s.size() == totalCol ? 0 : 1;
-		std::cout << std::setfill(' ') << std::setw(halfFree) << " " << s << std::setfill(' ')
-		          << std::setw(halfFree + c) << " ";
+	void printGenStats(unsigned int n) {
+		const unsigned int l = 80;
+		std::cout << tableHeader(l);
+		std::ostringstream output;
+		const auto &globalStats = genStats[n].at("global");
+		output << "Generation " << CYANBOLD << n << NORMAL << " ended in " << BLUE
+		       << globalStats.at("genTotalTime") << NORMAL << "s";
+		std::cout << tableCenteredText(l, output.str(), BLUEBOLD NORMAL BLUE NORMAL);
+		output = std::ostringstream();
+		output << GREYBOLD << "(" << globalStats.at("nEvals") << " evaluations, "
+		       << globalStats.at("nObjs") << " objs)" << NORMAL;
+		std::cout << tableCenteredText(l, output.str(), GREYBOLD NORMAL);
+		std::cout << tableSeparation(l);
+		double timeRatio = 0;
+		if (globalStats.at("genTotalTime") > 0)
+			timeRatio = globalStats.at("indTotalTime") / globalStats.at("genTotalTime");
+		output = std::ostringstream();
+		output << "🕝  max: " << BLUE << globalStats.at("maxTime") << NORMAL << "s";
+		output << ", 🕝  sum: " << BLUEBOLD << globalStats.at("indTotalTime") << NORMAL
+		       << "s (x" << timeRatio << " ratio)";
+		std::cout << tableCenteredText(l, output.str(), CYANBOLD NORMAL BLUE NORMAL "      ");
+		std::cout << tableSeparation(l);
+		for (const auto &o : genStats[n]) {
+			if (o.first != "global") {
+				output = std::ostringstream();
+				output << GREYBOLD << "--◇" << GREENBOLD << std::setw(10) << o.first << GREYBOLD
+				       << " ❯ " << NORMAL << " worst: " << YELLOW << std::setw(12)
+				       << o.second.at("worst") << NORMAL << ", avg: " << YELLOWBOLD
+				       << std::setw(12) << o.second.at("avg") << NORMAL << ", best: " << REDBOLD
+				       << std::setw(12) << o.second.at("best") << NORMAL;
+				std::cout << tableText(l, output.str(),
+				                       "    " GREYBOLD GREENBOLD GREYBOLD NORMAL YELLOWBOLD NORMAL
+				                           YELLOW NORMAL GREENBOLD NORMAL);
+			}
+		}
+		std::cout << tableFooter(l);
+	}
+
+	void printIndividualStats(const Individual<DNA> &ind) {
+		std::ostringstream output;
+		output << GREYBOLD << "[" << YELLOW << procId << GREYBOLD << "]-▶ " << NORMAL;
+		for (const auto &o : ind.fitnesses)
+			output << " " << o.first << ": " << BLUEBOLD << std::setw(12) << o.second << NORMAL
+			       << GREYBOLD << " |" << NORMAL;
+		output << " 🕝 : " << BLUE << ind.evalTime << "s" << NORMAL;
+		if (ind.wasAlreadyEvaluated)
+			output << GREYBOLD << " (already evaluated)\n" << NORMAL;
+		else
+			output << "\n";
+		if (novelty || verbosity >= 3) output << ind.infos << std::endl;
+		std::cout << output.str();
+	}
+
+	std::string tableHeader(unsigned int l) {
+		std::ostringstream output;
+		output << "┌";
+		for (auto i = 0u; i < l; ++i) output << "─";
+		output << "┓\n";
+		return output.str();
+	}
+
+	std::string tableFooter(unsigned int l) {
+		std::ostringstream output;
+		output << "┗";
+		for (auto i = 0u; i < l; ++i) output << "─";
+		output << "┛\n";
+		return output.str();
+	}
+
+	std::string tableSeparation(unsigned int l) {
+		std::ostringstream output;
+		output << "|" << GREYBOLD;
+		for (auto i = 0u; i < l; ++i) output << "-";
+		output << NORMAL << "|\n";
+		return output.str();
+	}
+
+	std::string tableText(int l, std::string txt, std::string unprinted = "") {
+		std::ostringstream output;
+		int txtsize = txt.size() - unprinted.size();
+		output << "|" << txt;
+		for (auto i = txtsize; i < l; ++i) output << " ";
+		output << "|\n";
+		return output.str();
+	}
+
+	std::string tableCenteredText(int l, std::string txt, std::string unprinted = "") {
+		std::ostringstream output;
+		int txtsize = txt.size() - unprinted.size();
+		int space = l - txtsize;
+		output << "|";
+		for (int i = 0; i < space / 2; ++i) output << " ";
+		output << txt;
+		for (int i = (space / 2) + txtsize; i < l; ++i) output << " ";
+		output << "|\n";
+		return output.str();
 	}
 
 	/*********************************************************************************
@@ -933,9 +823,9 @@ template <typename DNA, typename Evaluator> class GA {
 		// save n bests dnas for all objectives
 		vector<string> objectives;
 		for (auto &o : population[0].fitnesses) {
-			objectives.push_back(o.first);  // we need to know what are the objective functions
+			objectives.push_back(o.first);  // we need to know objective functions
 		}
-		map<string, vector<Individual<DNA>>> elites = getElites(objectives, n);
+		auto elites = getElites(objectives, n);
 		std::stringstream baseName;
 		baseName << folder << "/gen" << currentGeneration;
 		mkdir(baseName.str().c_str(), 0777);
@@ -963,8 +853,8 @@ template <typename DNA, typename Evaluator> class GA {
 		std::stringstream fileName;
 		fileName << folder << "/stats.csv";
 		csv << "generation";
-		if (stats.size() > 0) {
-			for (auto &cat : stats[0]) {
+		if (genStats.size() > 0) {
+			for (auto &cat : genStats[0]) {
 				std::stringstream column;
 				column << cat.first << "_";
 				for (auto &s : cat.second) {
@@ -972,9 +862,9 @@ template <typename DNA, typename Evaluator> class GA {
 				}
 			}
 			csv << endl;
-			for (size_t i = 0; i < stats.size(); ++i) {
+			for (size_t i = 0; i < genStats.size(); ++i) {
 				csv << i;
-				for (auto &cat : stats[i]) {
+				for (auto &cat : genStats[i]) {
 					for (auto &s : cat.second) {
 						csv << "," << s.second;
 					}

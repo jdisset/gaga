@@ -24,5 +24,6 @@ int main(int argc, char **argv) {
 	GA<IntDNA, BiggestIntEvaluator<Individual<IntDNA>>> evo(argc, argv);
 	evo.setVerbosity(1);
 	evo.setNbGenerations(400);
+	evo.setPopSize(100000);
 	return evo.start();
 }
