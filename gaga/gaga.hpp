@@ -413,6 +413,19 @@ template <typename DNA, typename Evaluator> class GA {
 	void prepareNextPop() {
 		assert(population.size() > 0);
 		assert(population.size() == popSize);
+		vector<Individual<DNA>> nextGen;
+		nextGen.reserve(popSize);
+		vector<string> obj;
+		for (auto &o : population[0].fitnesses) obj.push_back(o.first);
+		auto subpop = multiObjTournament(obj, popSize);
+		nextGen.insert(nextGen.end(), subpop.begin(), subpop.end());
+		assert(nextGen.size() == popSize);
+		population = nextGen;
+	}
+
+	void prepareSplitNextPop() {
+		assert(population.size() > 0);
+		assert(population.size() == popSize);
 		// simplest MO
 		vector<Individual<DNA>> nextGen;
 		nextGen.reserve(popSize);
@@ -427,6 +440,59 @@ template <typename DNA, typename Evaluator> class GA {
 		}
 		assert(nextGen.size() == popSize);
 		population = nextGen;
+	}
+
+	vector<Individual<DNA>> multiObjTournament(const std::vector<std::string> &objNames,
+	                                           size_t n) {
+		std::uniform_real_distribution<double> d(0.0, 1.0);
+		assert(n > nbElites);
+		vector<Individual<DNA>> newPop;
+		newPop.reserve(n);
+		// grab elites & add them to newPop
+		auto elites = getElites(objNames, nbElites);
+		for (auto &e : elites) {
+			for (auto &i : e.second) {
+				newPop.push_back(i);
+			}
+		}
+		while (newPop.size() < n) {
+			// choose 2 parents
+			std::uniform_int_distribution<int> dint(0, population.size() - 1);
+			std::vector<int> t0, t1;
+			assert(tournamentSize > 0);
+			for (unsigned int i = 0; i < tournamentSize; ++i) {
+				t0.push_back(dint(globalRand));
+				t1.push_back(dint(globalRand));
+			}
+			Individual<DNA> *p0 = &population[t0[0]];
+			Individual<DNA> *p1 = &population[t1[0]];
+			// we pick the objectives randomly
+			std::uniform_int_distribution<int> dObj(0, objNames.size() - 1);
+			std::string obj0 = objNames[dObj(globalRand)];
+			std::string obj1 = objNames[dObj(globalRand)];
+			for (unsigned int i = 0; i < tournamentSize; ++i) {
+				if (isBetter(population[t0[i]].fitnesses.at(obj0), p0->fitnesses.at(obj0)))
+					p0 = &population[t0[i]];
+				if (isBetter(population[t1[i]].fitnesses.at(obj1), p1->fitnesses.at(obj1)))
+					p1 = &population[t1[i]];
+			}
+			Individual<DNA> offspring;
+			// create 1 offspring or simply copy one parent
+			if (d(globalRand) < crossoverProba) {
+				offspring = Individual<DNA>(p0->dna.crossover(p1->dna));
+				offspring.evaluated = false;
+			} else {
+				offspring = *p0;
+			}
+			// mutate offspring
+			if (d(globalRand) < mutationProba) {
+				offspring.dna.mutate();
+				offspring.evaluated = false;
+			}
+			newPop.push_back(offspring);
+		}
+		assert(newPop.size() == n);
+		return newPop;
 	}
 
 	vector<Individual<DNA>> classicTournament(const std::string &objName, size_t n) {
@@ -767,7 +833,7 @@ template <typename DNA, typename Evaluator> class GA {
 			output << GREYBOLD << " (already evaluated)\n" << NORMAL;
 		else
 			output << "\n";
-		if (novelty || verbosity >= 3) output << ind.infos << std::endl;
+		if ((!novelty && verbosity >= 2) || verbosity >= 3) output << ind.infos << std::endl;
 		std::cout << output.str();
 	}
 
