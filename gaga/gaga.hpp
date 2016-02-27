@@ -247,8 +247,8 @@ template <typename DNA, typename Evaluator> class GA {
 
 	std::vector<std::map<std::string, std::map<std::string, double>>> genStats;
 
-	std::default_random_engine globalRand = std::default_random_engine(
-	    std::chrono::system_clock::now().time_since_epoch().count());
+	std::random_device rd;
+	std::default_random_engine globalRand = std::default_random_engine(rd());
 
 	bool isBetter(double a, double b) { return a > b; }  // comparison btwn 2 fitnesses
 
