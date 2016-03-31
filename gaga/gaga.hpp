@@ -343,7 +343,7 @@ template <typename DNA, typename Evaluator> class GA {
 				prepareNextPop();
 				auto tnp1 = high_resolution_clock::now();
 				double tnp = std::chrono::duration<double>(tnp1 - tnp0).count();
-				if (verbosity >= 1) {
+				if (verbosity >= 2) {
 					std::cout << "Time for save + next pop = " << tnp << " s." << std::endl;
 				}
 				finished = (currentGeneration++ >= nbGen);
