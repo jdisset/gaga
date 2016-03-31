@@ -257,17 +257,18 @@ template <typename DNA, typename Evaluator> class GA {
 	std::default_random_engine globalRand = std::default_random_engine(
 	    std::chrono::system_clock::now().time_since_epoch().count());
 
-	std::function<Individual<DNA> *()> selection = [this]() {
-		return randomObjTournament();
-	};
+	std::function<Individual<DNA> *()> selection;
 
-	bool isBetter(double a, double b) { return a > b; }  // comparison btwn 2 fitnesses
+	bool isBetter(double a, double b) const {
+		return a > b;
+	}  // comparison btwn 2 fitnesses
 
  public:
 	/*********************************************************************************
 	 *                              CONSTRUCTOR
 	 ********************************************************************************/
 	GA(int ac, char **av) : evaluate(ac, av), argc(ac), argv(av) {
+		setSelectionMethod(selecMethod);
 #ifdef CLUSTER
 		MPI_Init(&argc, &argv);
 		MPI_Comm_size(MPI_COMM_WORLD, &nbProcs);
@@ -331,6 +332,7 @@ template <typename DNA, typename Evaluator> class GA {
 				auto tg1 = high_resolution_clock::now();
 				double totalTime = std::chrono::duration<double>(tg1 - tg0).count();
 				updateStats(totalTime);
+				auto tnp0 = high_resolution_clock::now();
 				if (currentGeneration % saveInterval == 0) {
 					if (savePopEnabled) savePop();
 					if (novelty && saveArchiveEnabled) saveArchive();
@@ -339,6 +341,11 @@ template <typename DNA, typename Evaluator> class GA {
 				saveBests(nbSavedElites);
 				saveStats();
 				prepareNextPop();
+				auto tnp1 = high_resolution_clock::now();
+				double tnp = std::chrono::duration<double>(tnp1 - tnp0).count();
+				if (verbosity >= 1) {
+					std::cout << "Time for save + next pop = " << tnp << " s." << std::endl;
+				}
 				finished = (currentGeneration++ >= nbGen);
 			}
 		}
@@ -484,6 +491,7 @@ template <typename DNA, typename Evaluator> class GA {
 				}
 			}
 		}
+		return pareto;
 	}
 
 	Individual<DNA> *paretoTournament() {
@@ -493,7 +501,7 @@ template <typename DNA, typename Evaluator> class GA {
 			participants.push_back(&population[dint(globalRand)]);
 		auto pf = getParetoFront(participants);
 		assert(pf.size() > 0);
-		std::uniform_int_distribution<int> dpf(0, pf.size());
+		std::uniform_int_distribution<int> dpf(0, pf.size() - 1);
 		return pf[dpf(globalRand)];
 	}
 
@@ -683,6 +691,16 @@ template <typename DNA, typename Evaluator> class GA {
 		return res.str();
 	}
 
+	string selectMethodToString(const SelectionMethod &sm) {
+		switch (sm) {
+			case SelectionMethod::paretoTournament:
+				return "pareto tournament";
+			case SelectionMethod::randomObjTournament:
+				return "random objective tournament";
+		}
+		return "???";
+	}
+
 	/*********************************************************************************
 	 *                           STATS, LOGS & PRINTING
 	 ********************************************************************************/
@@ -700,6 +718,8 @@ template <typename DNA, typename Evaluator> class GA {
 		std::cout << "  ▹ population size = " << BLUE << popSize << NORMAL << std::endl;
 		std::cout << "  ▹ nb of elites = " << BLUE << nbElites << NORMAL << std::endl;
 		std::cout << "  ▹ nb of tournament competitors = " << BLUE << tournamentSize << NORMAL
+		          << std::endl;
+		std::cout << "  ▹ selection = " << BLUE << selectMethodToString(selecMethod) << NORMAL
 		          << std::endl;
 		std::cout << "  ▹ mutation rate = " << BLUE << mutationProba << NORMAL << std::endl;
 		std::cout << "  ▹ crossover rate = " << BLUE << crossoverProba << NORMAL << std::endl;
