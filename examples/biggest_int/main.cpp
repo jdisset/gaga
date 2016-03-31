@@ -14,8 +14,8 @@
 // You should have received a copy of the GNU Lesser General Public
 // License along with this library.
 #include "../../gaga/gaga.hpp"
-#include "evaluator.hpp"
 #include "dna.hpp"
+#include "evaluator.hpp"
 
 std::default_random_engine IntDNA::globalRand = std::default_random_engine(
     std::chrono::system_clock::now().time_since_epoch().count());
@@ -25,5 +25,7 @@ int main(int argc, char **argv) {
 	evo.setVerbosity(1);
 	evo.setNbGenerations(400);
 	evo.setPopSize(100000);
+	evo.setPopSaveInterval(-1);
+	evo.setSelectionMethod(SelectionMethod::paretoTournament);
 	return evo.start();
 }

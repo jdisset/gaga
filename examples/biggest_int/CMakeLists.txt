@@ -5,7 +5,7 @@ file(GLOB SRC
 	"../../gaga/gaga.hpp"
 	)
 #add_definitions(-DOMP)
-add_definitions(-DCLUSTER)
+#add_definitions(-DCLUSTER)
 find_package(MPI)
 include_directories(SYSTEM ${MPI_INCLUDE_PATH})
 add_executable(biggestInt ${SRC})
