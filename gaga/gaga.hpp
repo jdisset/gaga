@@ -31,20 +31,20 @@
 #include <omp.h>
 #endif
 
+#include <assert.h>
 #include <sys/stat.h>
 #include <sys/types.h>
-#include <assert.h>
-#include <vector>
 #include <chrono>
-#include <fstream>
-#include <sstream>
-#include <unordered_set>
-#include <unordered_map>
 #include <deque>
-#include <random>
-#include <utility>
+#include <fstream>
 #include <map>
+#include <random>
+#include <sstream>
 #include <string>
+#include <unordered_map>
+#include <unordered_set>
+#include <utility>
+#include <vector>
 #include "json/json.hpp"
 
 #define PURPLE "\033[35m"
@@ -176,6 +176,7 @@ template <typename DNA> struct Individual {
 // ga.setPopSize(400);
 // return ga.start();
 
+enum class SelectionMethod { paretoTournament, randomObjTournament };
 template <typename DNA, typename Evaluator> class GA {
  protected:
 	/*********************************************************************************
@@ -197,11 +198,7 @@ template <typename DNA, typename Evaluator> class GA {
 	string folder = "../evos/";       // where to save the results
 	double crossoverProba = 0.2;      // crossover probability
 	double mutationProba = 0.5;       // mutation probablility
-	unordered_map<string, double>
-	    proportions;  // {{"baseObj", 0.25}, {"novelty", 0.75}};  // fitness weight
-	                  // proportions contains the relative weights of the objectives
-	                  // if an objective is not present here but still used at evaluation
-	                  // a default non weighted average will be used
+	SelectionMethod selecMethod = SelectionMethod::randomObjTournament;
 	/********************************************************************************
 	 *                                 SETTERS
 	 ********************************************************************************/
@@ -228,8 +225,18 @@ template <typename DNA, typename Evaluator> class GA {
 		mutationProba = p <= 1.0 ? (p >= 0.0 ? p : 0.0) : 1.0;
 	}
 	void setMinNoveltyForArchive(double m) { minNoveltyForArchive = m; }
-	void setObjectivesDistribution(map<string, double> d) { proportions = d; }
-	void setObjectivesDistribution(string o, double d) { proportions[o] = d; }
+	void setSelectionMethod(const SelectionMethod &sm) {
+		selecMethod = sm;
+		switch (sm) {
+			case SelectionMethod::paretoTournament:
+				selection = [this]() { return paretoTournament(); };
+				break;
+			case SelectionMethod::randomObjTournament:
+			default:
+				selection = [this]() { return randomObjTournament(); };
+				break;
+		}
+	}
 
 	////////////////////////////////////////////////////////////////////////////////////
 
@@ -249,6 +256,10 @@ template <typename DNA, typename Evaluator> class GA {
 
 	std::default_random_engine globalRand = std::default_random_engine(
 	    std::chrono::system_clock::now().time_since_epoch().count());
+
+	std::function<Individual<DNA> *()> selection = [this]() {
+		return randomObjTournament();
+	};
 
 	bool isBetter(double a, double b) { return a > b; }  // comparison btwn 2 fitnesses
 
@@ -411,138 +422,110 @@ template <typename DNA, typename Evaluator> class GA {
 	 ********************************************************************************/
 	// Là où qu'on fait les bébés.
 	void prepareNextPop() {
-		assert(population.size() > 0);
+		assert(tournamentSize > 0);
 		assert(population.size() == popSize);
 		vector<Individual<DNA>> nextGen;
 		nextGen.reserve(popSize);
-		vector<string> obj;
-		for (auto &o : population[0].fitnesses) obj.push_back(o.first);
-		auto subpop = multiObjTournament(obj, popSize);
-		nextGen.insert(nextGen.end(), subpop.begin(), subpop.end());
-		assert(nextGen.size() == popSize);
-		population = nextGen;
-	}
-
-	void prepareSplitNextPop() {
-		assert(population.size() > 0);
-		assert(population.size() == popSize);
-		// simplest MO
-		vector<Individual<DNA>> nextGen;
-		nextGen.reserve(popSize);
-		vector<string> obj;
-		for (auto &o : population[0].fitnesses) obj.push_back(o.first);
-		size_t division = population.size() / obj.size();
-		size_t remaining = population.size() % obj.size();
-		for (size_t i = 0; i < obj.size(); ++i) {
-			size_t extra = i < remaining ? 1 : 0;
-			auto subpop = classicTournament(obj[i], division + extra);
-			nextGen.insert(nextGen.end(), subpop.begin(), subpop.end());
-		}
-		assert(nextGen.size() == popSize);
-		population = nextGen;
-	}
-
-	vector<Individual<DNA>> multiObjTournament(const std::vector<std::string> &objNames,
-	                                           size_t n) {
 		std::uniform_real_distribution<double> d(0.0, 1.0);
-		assert(n > nbElites);
-		vector<Individual<DNA>> newPop;
-		newPop.reserve(n);
-		// grab elites & add them to newPop
-		auto elites = getElites(objNames, nbElites);
-		for (auto &e : elites) {
-			for (auto &i : e.second) {
-				newPop.push_back(i);
-			}
-		}
-		while (newPop.size() < n) {
-			// choose 2 parents
-			std::uniform_int_distribution<int> dint(0, population.size() - 1);
-			std::vector<int> t0, t1;
-			assert(tournamentSize > 0);
-			for (unsigned int i = 0; i < tournamentSize; ++i) {
-				t0.push_back(dint(globalRand));
-				t1.push_back(dint(globalRand));
-			}
-			Individual<DNA> *p0 = &population[t0[0]];
-			Individual<DNA> *p1 = &population[t1[0]];
-			// we pick the objectives randomly
-			std::uniform_int_distribution<int> dObj(0, objNames.size() - 1);
-			std::string obj0 = objNames[dObj(globalRand)];
-			std::string obj1 = objNames[dObj(globalRand)];
-			for (unsigned int i = 0; i < tournamentSize; ++i) {
-				if (isBetter(population[t0[i]].fitnesses.at(obj0), p0->fitnesses.at(obj0)))
-					p0 = &population[t0[i]];
-				if (isBetter(population[t1[i]].fitnesses.at(obj1), p1->fitnesses.at(obj1)))
-					p1 = &population[t1[i]];
-			}
+		// elitism
+		auto elites = getElites(nbElites);
+		for (auto &e : elites)
+			for (auto &i : e.second) nextGen.push_back(i);
+
+		while (nextGen.size() < popSize) {
+			// selection + crossover
+			Individual<DNA> *p0 = selection();
 			Individual<DNA> offspring;
-			// create 1 offspring or simply copy one parent
 			if (d(globalRand) < crossoverProba) {
+				Individual<DNA> *p1 = selection();
 				offspring = Individual<DNA>(p0->dna.crossover(p1->dna));
 				offspring.evaluated = false;
 			} else {
 				offspring = *p0;
 			}
-			// mutate offspring
+			// mutation
 			if (d(globalRand) < mutationProba) {
 				offspring.dna.mutate();
 				offspring.evaluated = false;
 			}
-			newPop.push_back(offspring);
+			nextGen.push_back(offspring);
 		}
-		assert(newPop.size() == n);
-		return newPop;
+		assert(nextGen.size() == popSize);
+		population = nextGen;
 	}
 
-	vector<Individual<DNA>> classicTournament(const std::string &objName, size_t n) {
-		std::uniform_real_distribution<double> d(0.0, 1.0);
-		assert(n > nbElites);
-		vector<Individual<DNA>> newPop;
-		newPop.reserve(n);
-		// grab elites & add them to newPop
-		auto elites = getElites({{objName}}, nbElites);
-		for (auto &e : elites) {
-			for (auto &i : e.second) {
-				newPop.push_back(i);
-			}
-		}
-		while (newPop.size() < n) {
-			// choose 2 parents
-			std::uniform_int_distribution<int> dint(0, population.size() - 1);
-			std::vector<int> t0, t1;
-			assert(tournamentSize > 0);
-			for (unsigned int i = 0; i < tournamentSize; ++i) {
-				t0.push_back(dint(globalRand));
-				t1.push_back(dint(globalRand));
-			}
-			Individual<DNA> *p0 = &population[t0[0]];
-			Individual<DNA> *p1 = &population[t1[0]];
-			for (unsigned int i = 0; i < tournamentSize; ++i) {
-				if (isBetter(population[t0[i]].fitnesses.at(objName), p0->fitnesses.at(objName)))
-					p0 = &population[t0[i]];
-				if (isBetter(population[t1[i]].fitnesses.at(objName), p1->fitnesses.at(objName)))
-					p1 = &population[t1[i]];
-			}
-			Individual<DNA> offspring;
-			// create 1 offspring or simply copy one parent
-			if (d(globalRand) < crossoverProba) {
-				offspring = Individual<DNA>(p0->dna.crossover(p1->dna));
-				offspring.evaluated = false;
-			} else {
-				offspring = *p0;
-			}
-			// mutate offspring
-			if (d(globalRand) < mutationProba) {
-				offspring.dna.mutate();
-				offspring.evaluated = false;
-			}
-			newPop.push_back(offspring);
-		}
-		assert(newPop.size() == n);
-		return newPop;
+	bool paretoDominates(const Individual<DNA> &a, const Individual<DNA> &b) const {
+		for (auto &o : a.fitnesses)
+			if (!isBetter(o.second, b.fitnesses.at(o.first))) return false;
+		return true;
 	}
 
+	vector<Individual<DNA> *> getParetoFront(
+	    const std::vector<Individual<DNA> *> &ind) const {
+		// naive algorithm. Should be ok for small ind.size()
+		vector<Individual<DNA> *> pareto;
+		for (size_t i = 0; i < ind.size(); ++i) {
+			bool dominated = false;
+			for (auto &j : pareto) {
+				if (paretoDominates(*j, *ind[i])) {
+					dominated = true;
+					break;
+				}
+			}
+			if (!dominated) {
+				for (size_t j = i + 1; j < ind.size(); ++j) {
+					if (paretoDominates(*ind[j], *ind[i])) {
+						dominated = true;
+						break;
+					}
+				}
+				if (!dominated) {
+					pareto.push_back(ind[i]);
+				}
+			}
+		}
+	}
+
+	Individual<DNA> *paretoTournament() {
+		std::uniform_int_distribution<int> dint(0, population.size() - 1);
+		std::vector<Individual<DNA> *> participants;
+		for (unsigned int i = 0; i < tournamentSize; ++i)
+			participants.push_back(&population[dint(globalRand)]);
+		auto pf = getParetoFront(participants);
+		assert(pf.size() > 0);
+		std::uniform_int_distribution<int> dpf(0, pf.size());
+		return pf[dpf(globalRand)];
+	}
+
+	Individual<DNA> *randomObjTournament() {
+		std::uniform_int_distribution<int> dint(0, population.size() - 1);
+		std::vector<Individual<DNA> *> participants;
+		for (unsigned int i = 0; i < tournamentSize; ++i)
+			participants.push_back(&population[dint(globalRand)]);
+		auto champion = participants[0];
+		// we pick the objective randomly
+		std::string obj;
+		if (champion->fitnesses.size() == 1) {
+			obj = champion->fitnesses.begin()->first;
+		} else {
+			std::uniform_int_distribution<int> dObj(0, champion->fitnesses.size() - 1);
+			auto it = champion->fitnesses.begin();
+			std::advance(it, dObj(globalRand));
+			obj = it->first;
+		}
+		for (unsigned int i = 1; i < tournamentSize; ++i) {
+			if (isBetter(participants[i]->fitnesses.at(obj), champion->fitnesses.at(obj)))
+				champion = participants[i];
+		}
+		return champion;
+	}
+
+	unordered_map<string, vector<Individual<DNA>>> getElites(size_t n) {
+		// returns elites for every objectives
+		vector<string> obj;
+		for (auto &o : population[0].fitnesses) obj.push_back(o.first);
+		return getElites(obj, n);
+	}
 	unordered_map<string, vector<Individual<DNA>>> getElites(const vector<string> &obj,
 	                                                         size_t n) {
 		if (verbosity >= 3) {
@@ -642,8 +625,7 @@ template <typename DNA, typename Evaluator> class GA {
 	}
 	void updateNovelty() {
 		if (verbosity >= 2) {
-			cout << endl
-			     << endl;
+			cout << endl << endl;
 			std::stringstream output;
 			cout << GREY << " ❯❯  " << YELLOW << "COMPUTING NOVELTY " << NORMAL << " ⤵  "
 			     << endl
@@ -706,18 +688,15 @@ template <typename DNA, typename Evaluator> class GA {
 	 ********************************************************************************/
 	void printStart() {
 		int nbCol = 55;
-		std::cout << std::endl
-		          << GREY;
+		std::cout << std::endl << GREY;
 		for (int i = 0; i < nbCol - 1; ++i) std::cout << "━";
 		std::cout << std::endl;
 		std::cout << YELLOW << "              ☀     " << NORMAL << " Starting GAGA " << YELLOW
 		          << "    ☀ " << NORMAL;
 		std::cout << std::endl;
-		std::cout << BLUE << "                      ¯\\_ಠ ᴥ ಠ_/¯" << std::endl
-		          << GREY;
+		std::cout << BLUE << "                      ¯\\_ಠ ᴥ ಠ_/¯" << std::endl << GREY;
 		for (int i = 0; i < nbCol - 1; ++i) std::cout << "┄";
-		std::cout << std::endl
-		          << NORMAL;
+		std::cout << std::endl << NORMAL;
 		std::cout << "  ▹ population size = " << BLUE << popSize << NORMAL << std::endl;
 		std::cout << "  ▹ nb of elites = " << BLUE << nbElites << NORMAL << std::endl;
 		std::cout << "  ▹ nb of tournament competitors = " << BLUE << tournamentSize << NORMAL
@@ -747,8 +726,7 @@ template <typename DNA, typename Evaluator> class GA {
 #endif
 		std::cout << GREY;
 		for (int i = 0; i < nbCol - 1; ++i) std::cout << "━";
-		std::cout << std::endl
-		          << NORMAL;
+		std::cout << std::endl << NORMAL;
 	}
 	void updateStats(double totalTime) {
 		// stats organisations :
