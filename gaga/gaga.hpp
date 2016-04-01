@@ -246,6 +246,7 @@ template <typename DNA, typename Evaluator> class GA {
 	    archive;  // when novelty is enabled, we store the novel individuals there
 	vector<Individual<DNA>> population;
 	unsigned int currentGeneration = 0;
+	bool customInit = false;
 	// openmp/mpi stuff
 	int procId = 0;
 	int nbProcs = 1;
@@ -288,14 +289,23 @@ template <typename DNA, typename Evaluator> class GA {
 	/*********************************************************************************
 	 *                          START THE BOUZIN
 	 ********************************************************************************/
+	void setPopulation(const vector<Individual<DNA>> &p) {
+		if (p.size() != popSize)
+			throw std::invalid_argument("Population doesn't match the popSize param");
+		population = p;
+		popSize = population.size();
+		customInit = true;
+	}
 	// "Vroum vroum"
 	int start() {
-		bool finished = false;
-		population.reserve(popSize);
-		for (unsigned int i = 0; i < popSize; ++i) {
-			population.push_back(Individual<DNA>(DNA::random(argc, argv)));
-			population[population.size() - 1].evaluated = false;
+		if (!customInit) {
+			population.reserve(popSize);
+			for (unsigned int i = 0; i < popSize; ++i) {
+				population.push_back(Individual<DNA>(DNA::random(argc, argv)));
+				population[population.size() - 1].evaluated = false;
+			}
 		}
+		bool finished = false;
 		if (procId == 0) {
 			createFolder(folder);
 			if (verbosity >= 1) printStart();
