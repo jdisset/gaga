@@ -177,7 +177,7 @@ template <typename DNA> struct Individual {
 // return ga.start();
 
 enum class SelectionMethod { paretoTournament, randomObjTournament };
-template <typename DNA, typename Evaluator> class GA {
+template <typename DNA> class GA {
  protected:
 	/*********************************************************************************
 	 *                            MAIN GA SETTINGS
@@ -189,13 +189,13 @@ template <typename DNA, typename Evaluator> class GA {
 	unsigned int nbElites = 1;        // nb of elites to keep accross generations
 	unsigned int nbSavedElites = 1;   // nb of elites to save
 	unsigned int tournamentSize = 3;  // nb of competitors in tournament
-	unsigned int nbGen = 500;         // nb of generations
 	double minNoveltyForArchive = 1;  // min novelty for being added to the general archive
 	unsigned int KNN = 15;            // size of the neighbourhood for novelty
 	bool savePopEnabled = true;       // save the whole population?
 	bool saveArchiveEnabled = true;   // save the novelty archive?
 	unsigned int saveInterval = 1;    // interval between 2 whole population saves
 	string folder = "../evos/";       // where to save the results
+	string evaluatorName;             // name of the given evaluator func
 	double crossoverProba = 0.2;      // crossover probability
 	double mutationProba = 0.5;       // mutation probablility
 	SelectionMethod selecMethod = SelectionMethod::randomObjTournament;
@@ -214,7 +214,6 @@ template <typename DNA, typename Evaluator> class GA {
 	void setNbElites(unsigned int n) { nbElites = n; }
 	void setNbSavedElites(unsigned int n) { nbSavedElites = n; }
 	void setTournamentSize(unsigned int n) { tournamentSize = n; }
-	void setNbGenerations(unsigned int n) { nbGen = n; }
 	void setKNN(unsigned int n) { KNN = n; }
 	void setPopSaveInterval(unsigned int n) { saveInterval = n; }
 	void setSaveFolder(string s) { folder = s; }
@@ -223,6 +222,11 @@ template <typename DNA, typename Evaluator> class GA {
 	}
 	void setMutationProba(double p) {
 		mutationProba = p <= 1.0 ? (p >= 0.0 ? p : 0.0) : 1.0;
+	}
+	void setEvaluator(std::function<void(Individual<DNA> &)> e,
+	                  std::string ename = "anonymousEvaluator") {
+		evaluator = e;
+		evaluatorName = ename;
 	}
 	void setMinNoveltyForArchive(double m) { minNoveltyForArchive = m; }
 	void setSelectionMethod(const SelectionMethod &sm) {
@@ -238,13 +242,14 @@ template <typename DNA, typename Evaluator> class GA {
 		}
 	}
 
+	vector<Individual<DNA>> population;
+
 	////////////////////////////////////////////////////////////////////////////////////
 
  protected:
-	Evaluator evaluate;
+	std::function<void(Individual<DNA> &)> evaluator;
 	vector<Individual<DNA>>
 	    archive;  // when novelty is enabled, we store the novel individuals there
-	vector<Individual<DNA>> population;
 	unsigned int currentGeneration = 0;
 	bool customInit = false;
 	// openmp/mpi stuff
@@ -268,7 +273,7 @@ template <typename DNA, typename Evaluator> class GA {
 	/*********************************************************************************
 	 *                              CONSTRUCTOR
 	 ********************************************************************************/
-	GA(int ac, char **av) : evaluate(ac, av), argc(ac), argv(av) {
+	GA(int ac, char **av) : argc(ac), argv(av) {
 		setSelectionMethod(selecMethod);
 #ifdef CLUSTER
 		MPI_Init(&argc, &argv);
@@ -290,27 +295,29 @@ template <typename DNA, typename Evaluator> class GA {
 	 *                          START THE BOUZIN
 	 ********************************************************************************/
 	void setPopulation(const vector<Individual<DNA>> &p) {
-		if (p.size() != popSize)
-			throw std::invalid_argument("Population doesn't match the popSize param");
 		population = p;
+		if (population.size() != popSize)
+			throw std::invalid_argument("Population doesn't match the popSize param");
 		popSize = population.size();
-		customInit = true;
+	}
+
+	void initPopulation(const std::function<DNA()> &f) {
+		population.reserve(popSize);
+		for (unsigned int i = 0; i < popSize; ++i) {
+			population.push_back(Individual<DNA>(f()));
+			population[population.size() - 1].evaluated = false;
+		}
 	}
 	// "Vroum vroum"
-	int start() {
-		if (!customInit) {
-			population.reserve(popSize);
-			for (unsigned int i = 0; i < popSize; ++i) {
-				population.push_back(Individual<DNA>(DNA::random(argc, argv)));
-				population[population.size() - 1].evaluated = false;
-			}
-		}
-		bool finished = false;
+	void step(int nbGeneration = 1) {
+		if (population.size() != popSize)
+			throw std::invalid_argument("Population doesn't match the popSize param");
+		if (!evaluator) throw std::invalid_argument("No evaluator specified");
 		if (procId == 0) {
 			createFolder(folder);
 			if (verbosity >= 1) printStart();
 		}
-		while (!finished) {
+		for (int nbg = 0; nbg < nbGeneration; ++nbg) {
 			auto tg0 = high_resolution_clock::now();
 #ifdef CLUSTER
 			MPI_distributePopulation();
@@ -322,7 +329,7 @@ template <typename DNA, typename Evaluator> class GA {
 				if (!population[i].evaluated) {
 					auto t0 = high_resolution_clock::now();
 					population[i].dna.reset();
-					evaluate(population[i]);
+					evaluator(population[i]);
 					auto t1 = high_resolution_clock::now();
 					population[i].evaluated = true;
 					double indTime = std::chrono::duration<double>(t1 - t0).count();
@@ -356,13 +363,12 @@ template <typename DNA, typename Evaluator> class GA {
 				if (verbosity >= 2) {
 					std::cout << "Time for save + next pop = " << tnp << " s." << std::endl;
 				}
-				finished = (currentGeneration++ >= nbGen);
 			}
+			++currentGeneration;
 		}
 #ifdef CLUSTER
 		MPI_Finalize();
 #endif
-		return 0;
 	}
 
 // MPI specifics
@@ -505,18 +511,18 @@ template <typename DNA, typename Evaluator> class GA {
 	}
 
 	Individual<DNA> *paretoTournament() {
-		std::uniform_int_distribution<int> dint(0, population.size() - 1);
+		std::uniform_int_distribution<size_t> dint(0, population.size() - 1);
 		std::vector<Individual<DNA> *> participants;
 		for (unsigned int i = 0; i < tournamentSize; ++i)
 			participants.push_back(&population[dint(globalRand)]);
 		auto pf = getParetoFront(participants);
 		assert(pf.size() > 0);
-		std::uniform_int_distribution<int> dpf(0, pf.size() - 1);
+		std::uniform_int_distribution<size_t> dpf(0, pf.size() - 1);
 		return pf[dpf(globalRand)];
 	}
 
 	Individual<DNA> *randomObjTournament() {
-		std::uniform_int_distribution<int> dint(0, population.size() - 1);
+		std::uniform_int_distribution<size_t> dint(0, population.size() - 1);
 		std::vector<Individual<DNA> *> participants;
 		for (unsigned int i = 0; i < tournamentSize; ++i)
 			participants.push_back(&population[dint(globalRand)]);
@@ -526,7 +532,8 @@ template <typename DNA, typename Evaluator> class GA {
 		if (champion->fitnesses.size() == 1) {
 			obj = champion->fitnesses.begin()->first;
 		} else {
-			std::uniform_int_distribution<int> dObj(0, champion->fitnesses.size() - 1);
+			std::uniform_int_distribution<int> dObj(
+			    0, static_cast<int>(champion->fitnesses.size()) - 1);
 			auto it = champion->fitnesses.begin();
 			std::advance(it, dObj(globalRand));
 			obj = it->first;
@@ -962,7 +969,7 @@ template <typename DNA, typename Evaluator> class GA {
 		struct tm *parts = localtime(&now_c);
 
 		std::stringstream fname;
-		fname << evaluate.name << parts->tm_mday << "_" << parts->tm_mon + 1 << "_";
+		fname << evaluatorName << parts->tm_mday << "_" << parts->tm_mon + 1 << "_";
 		int cpt = 0;
 		std::stringstream ftot;
 		do {
@@ -996,7 +1003,7 @@ template <typename DNA, typename Evaluator> class GA {
 
 	void savePop() {
 		json o = Individual<DNA>::popToJSON(population);
-		o["evaluator"] = evaluate.name;
+		o["evaluator"] = evaluatorName;
 		o["generation"] = currentGeneration;
 		std::stringstream baseName;
 		baseName << folder << "/gen" << currentGeneration;
@@ -1010,7 +1017,7 @@ template <typename DNA, typename Evaluator> class GA {
 	}
 	void saveArchive() {
 		json o = Individual<DNA>::popToJSON(archive);
-		o["evaluator"] = evaluate.name;
+		o["evaluator"] = evaluatorName;
 		std::stringstream baseName;
 		baseName << folder << "/gen" << currentGeneration;
 		mkdir(baseName.str().c_str(), 0777);
