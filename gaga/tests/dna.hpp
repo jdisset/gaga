@@ -1,9 +1,11 @@
+#ifndef DNA_HPP
+#define DNA_HPP
 #include <random>
 #include "../json/src/json.hpp"
 
-std::default_random_engine rndEngine;
 struct IntDNA {
 	int value = 0;
+  std::default_random_engine rndEngine;
 	std::uniform_int_distribution<int> distribution =
     std::uniform_int_distribution<int>(0, 1000000);
 	IntDNA() {}
@@ -34,3 +36,4 @@ struct IntDNA {
 		return d;
 	}
 };
+#endif
