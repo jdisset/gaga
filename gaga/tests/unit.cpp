@@ -2,7 +2,7 @@
 #include <random>
 #include "../gaga.hpp"
 #include "../json/json.hpp"
-#include "catch.hpp"
+#include "Catch/single_include/catch.hpp"
 
 std::default_random_engine rndEngine;
 struct IntDNA {

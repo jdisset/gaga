@@ -1,0 +1,3 @@
+[submodule "gaga/tests/Catch"]
+	path = gaga/tests/Catch
+	url = https://github.com/philsquared/Catch.git
