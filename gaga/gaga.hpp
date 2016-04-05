@@ -45,7 +45,7 @@
 #include <unordered_set>
 #include <utility>
 #include <vector>
-#include "json/json.hpp"
+#include "json/src/json.hpp"
 
 #define PURPLE "\033[35m"
 #define PURPLEBOLD "\033[1;35m"

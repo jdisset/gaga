@@ -1,6 +1,5 @@
 #define CATCH_CONFIG_MAIN
 #include "../gaga.hpp"
-#include "../json/json.hpp"
 #include "dna.hpp"
 #include "Catch/single_include/catch.hpp"
 
