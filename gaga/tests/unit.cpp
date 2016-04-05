@@ -20,13 +20,17 @@ TEST_CASE("Population is initialized ok", "[population]") { initGA<IntDNA>(); }
 
 template <typename T> void GRNGA() {
 	GAGA::GA<T> ga(0, nullptr);
-	ga.setVerbosity(0);
+  int popsize = 100;
+	ga.setVerbosity(1);
 	ga.setEvaluator([](auto &i) { i.fitnesses["length"] = i.dna.getProteinSize(ProteinType::regul); });
 	REQUIRE( (ga.population.size() == 0) );
-	ga.setPopSize(400);
+	ga.setPopSize(popsize);
   vector<GAGA::Individual<T>> pop;
-  for (int i = 0; i < 400; ++i) {
+  for (int i = 0; i < popsize; ++i) {
     T t;
+    t.config.ADD_RATE = 1.0;
+    t.config.DEL_RATE = 0.0;
+    t.config.MODIF_RATE = 0.0;
     t.addRandomProtein(ProteinType::input, "input");
     t.addRandomProtein(ProteinType::output, "output");
     t.randomReguls(1);
@@ -34,15 +38,8 @@ template <typename T> void GRNGA() {
     pop.push_back(GAGA::Individual<T>(t));
   }
 	ga.setPopulation(pop);
-	ga.step(10);
-	REQUIRE(ga.population.size() == 400);
-  /* TODO
-  auto elites = ga.getElites(1);
-  for (auto &e : elites) {
-    for (auto &i : e.second) {
-      REQUIRE(i.fitnesses.at(e.first) >= 1);
-    }
-  }
-  */
+	ga.step(1);
+	REQUIRE(ga.population.size() == popsize);
+  for (auto &p : ga.population) REQUIRE(p.fitnesses["length"] >= 1.0);
 }
 TEST_CASE("Test with GRGEN GRN", "[population]") { GRNGA<GRN<Classic>>(); }
