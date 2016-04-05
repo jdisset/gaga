@@ -610,7 +610,7 @@ template <typename DNA> class GA {
 	                             const fpType &fp) {
 		double avgDist = 0;
 		if (arch.size() > 1) {
-			unsigned int k = arch.size() < K ? arch.size() : K;
+			unsigned int k = arch.size() < K ? static_cast<unsigned int>(arch.size()) : K;
 			vector<Individual<DNA>> knn;
 			knn.reserve(k);
 			vector<double> knnDist;
@@ -774,7 +774,7 @@ template <typename DNA> class GA {
 		currentGenStats["global"]["genTotalTime"] = totalTime;
 		double indTotalTime = 0.0, maxTime = 0.0;
 		int nEvals = 0;
-		int nObjs = population[0].fitnesses.size();
+		int nObjs = static_cast<int>(population[0].fitnesses.size());
 		for (const auto &o : population[0].fitnesses) {
 			currentGenStats[o.first] = {
 			    {{"avg", 0.0}, {"worst", o.second}, {"best", o.second}}};
@@ -878,7 +878,7 @@ template <typename DNA> class GA {
 
 	std::string tableText(int l, std::string txt, std::string unprinted = "") {
 		std::ostringstream output;
-		int txtsize = txt.size() - unprinted.size();
+		int txtsize = static_cast<int>(txt.size() - unprinted.size());
 		output << "|" << txt;
 		for (auto i = txtsize; i < l; ++i) output << " ";
 		output << "|\n";
@@ -887,7 +887,7 @@ template <typename DNA> class GA {
 
 	std::string tableCenteredText(int l, std::string txt, std::string unprinted = "") {
 		std::ostringstream output;
-		int txtsize = txt.size() - unprinted.size();
+		int txtsize = static_cast<int>(txt.size() - unprinted.size());
 		int space = l - txtsize;
 		output << "|";
 		for (int i = 0; i < space / 2; ++i) output << " ";
