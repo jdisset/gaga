@@ -1,6 +1,6 @@
 #include "../gaga.hpp"
 #include "dna.hpp"
-#include "Catch/single_include/catch.hpp"
+#include "catch/catch.hpp"
 
 template <typename T> void paretoGA() {
 	GAGA::GA<T> ga(0, nullptr);

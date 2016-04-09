@@ -45,7 +45,7 @@
 #include <unordered_set>
 #include <utility>
 #include <vector>
-#include "json/src/json.hpp"
+#include "include/json.hpp"
 
 #define PURPLE "\033[35m"
 #define PURPLEBOLD "\033[1;35m"
@@ -185,12 +185,12 @@ template <typename DNA> class GA {
 	bool novelty = false;  // is novelty enabled ?
 	unsigned int verbosity =
 	    2;  // 0 = silent; 1 = generations stats; 2 = individuals stats; 3 = everything
-	unsigned int popSize = 500;       // nb of individuals in the population
-	unsigned int nbElites = 1;        // nb of elites to keep accross generations
-	unsigned int nbSavedElites = 1;   // nb of elites to save
-	unsigned int tournamentSize = 3;  // nb of competitors in tournament
+	size_t popSize = 500;       // nb of individuals in the population
+	size_t nbElites = 1;        // nb of elites to keep accross generations
+	size_t nbSavedElites = 1;   // nb of elites to save
+	size_t tournamentSize = 3;  // nb of competitors in tournament
 	double minNoveltyForArchive = 1;  // min novelty for being added to the general archive
-	unsigned int KNN = 15;            // size of the neighbourhood for novelty
+	size_t KNN = 15;            // size of the neighbourhood for novelty
 	bool savePopEnabled = true;       // save the whole population?
 	bool saveArchiveEnabled = true;   // save the novelty archive?
 	unsigned int saveInterval = 1;    // interval between 2 whole population saves
@@ -210,11 +210,11 @@ template <typename DNA> class GA {
 	void enableArchiveSave() { saveArchiveEnabled = true; }
 	void disableArchiveSave() { saveArchiveEnabled = false; }
 	void setVerbosity(unsigned int lvl) { verbosity = lvl <= 3 ? (lvl >= 0 ? lvl : 0) : 3; }
-	void setPopSize(unsigned int s) { popSize = s; }
-	void setNbElites(unsigned int n) { nbElites = n; }
-	void setNbSavedElites(unsigned int n) { nbSavedElites = n; }
-	void setTournamentSize(unsigned int n) { tournamentSize = n; }
-	void setKNN(unsigned int n) { KNN = n; }
+	void setPopSize(size_t s) { popSize = s; }
+	void setNbElites(size_t n) { nbElites = n; }
+	void setNbSavedElites(size_t n) { nbSavedElites = n; }
+	void setTournamentSize(size_t n) { tournamentSize = n; }
+	void setKNN(size_t n) { KNN = n; }
 	void setPopSaveInterval(unsigned int n) { saveInterval = n; }
 	void setSaveFolder(string s) { folder = s; }
 	void setCrossoverProba(double p) {
@@ -250,7 +250,7 @@ template <typename DNA> class GA {
 	std::function<void(Individual<DNA> &)> evaluator;
 	vector<Individual<DNA>>
 	    archive;  // when novelty is enabled, we store the novel individuals there
-	unsigned int currentGeneration = 0;
+	size_t currentGeneration = 0;
 	bool customInit = false;
 	// openmp/mpi stuff
 	int procId = 0;
@@ -303,7 +303,7 @@ template <typename DNA> class GA {
 
 	void initPopulation(const std::function<DNA()> &f) {
 		population.reserve(popSize);
-		for (unsigned int i = 0; i < popSize; ++i) {
+		for (size_t i = 0; i < popSize; ++i) {
 			population.push_back(Individual<DNA>(f()));
 			population[population.size() - 1].evaluated = false;
 		}
@@ -377,8 +377,8 @@ template <typename DNA> class GA {
 		if (procId == 0) {
 			// if we're in the master process, we send b(i)atches to the others.
 			// master will have the remaining
-			unsigned int batchSize = population.size() / nbProcs;
-			for (unsigned int dest = 1; dest < (unsigned int)nbProcs; ++dest) {
+			size_t batchSize = population.size() / nbProcs;
+			for (size_t dest = 1; dest < (size_t)nbProcs; ++dest) {
 				vector<Individual<DNA>> batch;
 				for (size_t ind = 0; ind < batchSize; ++ind) {
 					batch.push_back(population.back());
@@ -418,7 +418,7 @@ template <typename DNA> class GA {
 			MPI_Send(tmp.data(), tmp.size(), MPI_BYTE, 0, 0, MPI_COMM_WORLD);
 		} else {
 			// master process receives all other batches
-			for (unsigned int source = 1; source < (unsigned int)nbProcs; ++source) {
+			for (size_t source = 1; source < (size_t)nbProcs; ++source) {
 				int strLength;
 				MPI_Status status;
 				MPI_Probe(source, 0, MPI_COMM_WORLD, &status);  // determining batch size
@@ -513,7 +513,7 @@ template <typename DNA> class GA {
 	Individual<DNA> *paretoTournament() {
 		std::uniform_int_distribution<size_t> dint(0, population.size() - 1);
 		std::vector<Individual<DNA> *> participants;
-		for (unsigned int i = 0; i < tournamentSize; ++i)
+		for (size_t i = 0; i < tournamentSize; ++i)
 			participants.push_back(&population[dint(globalRand)]);
 		auto pf = getParetoFront(participants);
 		assert(pf.size() > 0);
@@ -524,7 +524,7 @@ template <typename DNA> class GA {
 	Individual<DNA> *randomObjTournament() {
 		std::uniform_int_distribution<size_t> dint(0, population.size() - 1);
 		std::vector<Individual<DNA> *> participants;
-		for (unsigned int i = 0; i < tournamentSize; ++i)
+		for (size_t i = 0; i < tournamentSize; ++i)
 			participants.push_back(&population[dint(globalRand)]);
 		auto champion = participants[0];
 		// we pick the objective randomly
@@ -538,7 +538,7 @@ template <typename DNA> class GA {
 			std::advance(it, dObj(globalRand));
 			obj = it->first;
 		}
-		for (unsigned int i = 1; i < tournamentSize; ++i) {
+		for (size_t i = 1; i < tournamentSize; ++i) {
 			if (isBetter(participants[i]->fitnesses.at(obj), champion->fitnesses.at(obj)))
 				champion = participants[i];
 		}
@@ -606,18 +606,18 @@ template <typename DNA> class GA {
 	// computeAvgDist (novelty related)
 	// returns the average distance of a footprint fp to its k nearest neighbours
 	// in an archive of footprints
-	static double computeAvgDist(unsigned int K, const vector<Individual<DNA>> &arch,
+	static double computeAvgDist(size_t K, const vector<Individual<DNA>> &arch,
 	                             const fpType &fp) {
 		double avgDist = 0;
 		if (arch.size() > 1) {
-			unsigned int k = arch.size() < K ? static_cast<unsigned int>(arch.size()) : K;
+			size_t k = arch.size() < K ? static_cast<size_t>(arch.size()) : K;
 			vector<Individual<DNA>> knn;
 			knn.reserve(k);
 			vector<double> knnDist;
 			knnDist.reserve(k);
 			std::pair<double, size_t> worstKnn = {getFootprintDistance(fp, arch[0].footprint),
 			                                      0};  // maxKnn is the worst among the knn
-			for (unsigned int i = 0; i < k; ++i) {
+			for (size_t i = 0; i < k; ++i) {
 				knn.push_back(arch[i]);
 				double d = getFootprintDistance(fp, arch[i].footprint);
 				knnDist.push_back(d);
@@ -799,8 +799,8 @@ template <typename DNA> class GA {
 		genStats.push_back(currentGenStats);
 	}
 
-	void printGenStats(unsigned int n) {
-		const unsigned int l = 80;
+	void printGenStats(size_t n) {
+		const size_t l = 80;
 		std::cout << tableHeader(l);
 		std::ostringstream output;
 		const auto &globalStats = genStats[n].at("global");
@@ -900,7 +900,7 @@ template <typename DNA> class GA {
 	/*********************************************************************************
 	 *                         SAVING STUFF
 	 ********************************************************************************/
-	void saveBests(int n) {
+	void saveBests(size_t n) {
 		// save n bests dnas for all objectives
 		vector<string> objectives;
 		for (auto &o : population[0].fitnesses) {

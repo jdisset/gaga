@@ -1,7 +1,7 @@
 #ifndef DNA_HPP
 #define DNA_HPP
 #include <random>
-#include "../json/src/json.hpp"
+#include "../include/json.hpp"
 
 struct IntDNA {
 	int value = 0;
