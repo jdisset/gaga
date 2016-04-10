@@ -1,8 +1,7 @@
-                        _____ _____ _____ _____ 
-                       |   __|  _  |   __|  _  |
-                       |  |  |     |  |  |     |
-                       |_____|__|__|_____|__|__|
-
+             _____ _____ _____ _____ 
+            |   __|  _  |   __|  _  |
+            |  |  |     |  |  |     |
+            |_____|__|__|_____|__|__|
 
  Single header parralel multi-objective genetic algorithm library written in C++14.
 
