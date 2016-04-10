@@ -3,10 +3,10 @@
             |  |  |     |  |  |     |
             |_____|__|__|_____|__|__|
 
- Single header parralel multi-objective genetic algorithm library written in C++14.
+Header-only parralel multi-objective genetic algorithm library written in C++14.
 
 ## Installation
-Simply download & include gaga.hpp in your project directory. You can also submodule this repository. Don't forget to set the -std=c++14 flag when compiling.
+Simply clone this repository and include gaga.hpp in your project. Don't forget to set the -std=c++14 flag when compiling.
 
 ## Usage
 ### DNA & Individual
@@ -51,8 +51,8 @@ You can now run gaga
 See tests for more examples.
 
 ## Parallelism
-GAGA supports both MPI and OpenMP based parallelism. Both can be enabled at the same time. In order to use OpenMP parallelisation (recommended on shared memory architectures), you need to `#define OMP` before including gaga's header (you also need to compile with the -fopenmp flag).
-If you need to use MPI parralelism (when running on a cluster for example), link the MPI library of your choice (gaga was tested with IntelMPI and OpenMPI but should work with any implementation) and `#define CLUSTER` before including gaga.
+GAGA supports both MPI and OpenMP based parallelism. For OpenMP parallelisation (recommended on shared memory architectures), you need to `#define OMP` before including gaga's header (don't forget to compile with the -fopenmp flag).
+If you need to use MPI parralelism (when running on a cluster for example), `#define CLUSTER` before including gaga. You then need to link the MPI library of your choice (OpenMPI or IntelMPI for example) when compiling.
 
 ## Options
 ### General
