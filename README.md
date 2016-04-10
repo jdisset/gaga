@@ -3,7 +3,7 @@
             |  |  |     |  |  |     |
             |_____|__|__|_____|__|__|
 
-Header-only parralel multi-objective genetic algorithm library written in C++14.
+Header-only parallel multi-objective genetic algorithm library written in C++14.
 
 ## Installation
 Simply clone this repository and include gaga.hpp in your project. Don't forget to set the -std=c++14 flag when compiling.
