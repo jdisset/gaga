@@ -22,7 +22,7 @@
  * *************************************/
 // before including this file,
 // #define OMP if you want OpenMP parallelisation
-// #define CLUSTER if you want MPI parralelisation
+// #define CLUSTER if you want MPI parallelisationelisation
 #ifdef CLUSTER
 #include <mpi.h>
 #include <cstring>
@@ -92,7 +92,7 @@ using std::chrono::system_clock;
 // About parallelisation :
 // before including this file,
 // #define OMP if you want OpenMP parallelisation
-// #define CLUSTER if you want MPI parralelisation
+// #define CLUSTER if you want MPI parallelisation
 
 /*****************************************************************************
  *                         INDIVIDUAL CLASS
@@ -176,12 +176,22 @@ template <typename DNA> struct Individual {
 // ga.setPopSize(400);
 // return ga.start();
 
+struct Greater
+{
+    bool operator()(double a, double b) const
+    {
+        return a > b;
+    }
+};
+
 enum class SelectionMethod { paretoTournament, randomObjTournament };
-template <typename DNA> class GA {
+template <typename DNA, typename IsBetterOp = Greater> class GA {
  protected:
 	/*********************************************************************************
 	 *                            MAIN GA SETTINGS
 	 ********************************************************************************/
+    IsBetterOp isBetter;
+
 	bool novelty = false;  // is novelty enabled ?
 	unsigned int verbosity =
 	    2;  // 0 = silent; 1 = generations stats; 2 = individuals stats; 3 = everything
@@ -265,10 +275,6 @@ template <typename DNA> class GA {
 	std::default_random_engine globalRand = std::default_random_engine(rd());
 
 	std::function<Individual<DNA> *()> selection;
-
-	bool isBetter(double a, double b) const {
-		return a > b;
-	}  // comparison btwn 2 fitnesses
 
  public:
 	/*********************************************************************************
@@ -768,22 +774,22 @@ template <typename DNA> class GA {
 			std::cout << "  ▹ novelty is " << RED << "disabled" << NORMAL << std::endl;
 		}
 #ifdef CLUSTER
-		std::cout << "  ▹ MPI parralelisation is " << GREEN << "enabled" << NORMAL
+        std::cout << "  ▹ MPI parallelisation is " << GREEN << "enabled" << NORMAL
 		          << std::endl;
 #else
-		std::cout << "  ▹ MPI parralelisation is " << RED << "disabled" << NORMAL
+        std::cout << "  ▹ MPI parallelisation is " << RED << "disabled" << NORMAL
 		          << std::endl;
 #endif
 #ifdef OMP
-		std::cout << "  ▹ OpenMP parralelisation is " << GREEN << "enabled" << NORMAL
+        std::cout << "  ▹ OpenMP parallelisation is " << GREEN << "enabled" << NORMAL
 		          << std::endl;
 #else
-		std::cout << "  ▹ OpenMP parralelisation is " << RED << "disabled" << NORMAL
+        std::cout << "  ▹ OpenMP parallelisation is " << RED << "disabled" << NORMAL
 		          << std::endl;
 #endif
 		std::cout << GREY;
 		for (int i = 0; i < nbCol - 1; ++i) std::cout << "━";
-		std::cout << std::endl << NORMAL;
+        std::cout << NORMAL << std::endl;
 	}
 	void updateStats(double totalTime) {
 		// stats organisations :
