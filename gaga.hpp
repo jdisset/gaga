@@ -131,7 +131,7 @@ template <typename DNA> struct Individual {
 	// Exports individual to json
 	json toJSON() const {
 		json o;
-		o["dna"] = json::parse(dna.toJSON());
+		o["dna"] = json::parse(dna.serialize());
 		o["fitnesses"] = fitnesses;
 		o["footprint"] = footprint;
 		o["infos"] = infos;
@@ -185,12 +185,12 @@ template <typename DNA> class GA {
 	bool novelty = false;  // is novelty enabled ?
 	unsigned int verbosity =
 	    2;  // 0 = silent; 1 = generations stats; 2 = individuals stats; 3 = everything
-	size_t popSize = 500;       // nb of individuals in the population
-	size_t nbElites = 1;        // nb of elites to keep accross generations
-	size_t nbSavedElites = 1;   // nb of elites to save
-	size_t tournamentSize = 3;  // nb of competitors in tournament
+	size_t popSize = 500;             // nb of individuals in the population
+	size_t nbElites = 1;              // nb of elites to keep accross generations
+	size_t nbSavedElites = 1;         // nb of elites to save
+	size_t tournamentSize = 3;        // nb of competitors in tournament
 	double minNoveltyForArchive = 1;  // min novelty for being added to the general archive
-	size_t KNN = 15;            // size of the neighbourhood for novelty
+	size_t KNN = 15;                  // size of the neighbourhood for novelty
 	bool savePopEnabled = true;       // save the whole population?
 	bool saveArchiveEnabled = true;   // save the novelty archive?
 	unsigned int saveInterval = 1;    // interval between 2 whole population saves
@@ -455,26 +455,35 @@ template <typename DNA> class GA {
 		for (auto &e : elites)
 			for (auto &i : e.second) nextGen.push_back(i);
 
+		if (verbosity >= 3) cerr << "preparing rest of the population" << endl;
 		while (nextGen.size() < popSize) {
 			// selection + crossover
 			Individual<DNA> *p0 = selection();
 			Individual<DNA> offspring;
 			if (d(globalRand) < crossoverProba) {
+				if (verbosity >= 3) cerr << "crossover" << endl;
 				Individual<DNA> *p1 = selection();
 				offspring = Individual<DNA>(p0->dna.crossover(p1->dna));
 				offspring.evaluated = false;
+				if (verbosity >= 3) cerr << "crossover ok" << endl;
 			} else {
+				if (verbosity >= 3) cerr << "no crossover" << endl;
 				offspring = *p0;
 			}
 			// mutation
 			if (d(globalRand) < mutationProba) {
+				if (verbosity >= 3) cerr << "mutation" << endl;
 				offspring.dna.mutate();
 				offspring.evaluated = false;
 			}
+			if (verbosity >= 3) cerr << "pushing" << endl;
 			nextGen.push_back(offspring);
 		}
+		if (verbosity >= 3) cerr << "done" << endl;
 		assert(nextGen.size() == popSize);
+		population.clear();
 		population = nextGen;
+		if (verbosity >= 3) cerr << "done completely" << endl;
 	}
 
 	bool paretoDominates(const Individual<DNA> &a, const Individual<DNA> &b) const {
@@ -522,6 +531,7 @@ template <typename DNA> class GA {
 	}
 
 	Individual<DNA> *randomObjTournament() {
+		if (verbosity >= 3) cerr << "random obj tournament called" << endl;
 		std::uniform_int_distribution<size_t> dint(0, population.size() - 1);
 		std::vector<Individual<DNA> *> participants;
 		for (size_t i = 0; i < tournamentSize; ++i)
@@ -542,6 +552,7 @@ template <typename DNA> class GA {
 			if (isBetter(participants[i]->fitnesses.at(obj), champion->fitnesses.at(obj)))
 				champion = participants[i];
 		}
+		if (verbosity >= 3) cerr << "champion found" << endl;
 		return champion;
 	}
 
@@ -923,7 +934,7 @@ template <typename DNA> class GA {
 				if (!fs) {
 					cerr << "Cannot open the output file." << endl;
 				}
-				fs << i.dna.toJSON();
+				fs << i.dna.serialize();
 				fs.close();
 			}
 		}
