@@ -1025,7 +1025,7 @@ template <typename DNA, typename IsBetterOp = Greater> class GA {
 		struct tm *parts = localtime(&now_c);
 
 		std::stringstream fname;
-		fname << evaluatorName << parts->tm_mday << "_" << parts->tm_mon + 1 << "_";
+        fname << evaluatorName << "_" << parts->tm_mday << "_" << parts->tm_mon + 1 << "_";
 		int cpt = 0;
 		std::stringstream ftot;
 		do {
