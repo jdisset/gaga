@@ -310,8 +310,6 @@ template <typename DNA> class GA {
 	}
 	// "Vroum vroum"
 	void step(int nbGeneration = 1) {
-		if (population.size() != popSize)
-			throw std::invalid_argument("Population doesn't match the popSize param");
 		if (!evaluator) throw std::invalid_argument("No evaluator specified");
 		if (procId == 0) {
 			createFolder(folder);
@@ -345,6 +343,8 @@ template <typename DNA> class GA {
 			MPI_receivePopulation();
 #endif
 			if (procId == 0) {
+				if (population.size() != popSize)
+					throw std::invalid_argument("Population doesn't match the popSize param");
 				if (novelty) updateNovelty();
 				auto tg1 = high_resolution_clock::now();
 				double totalTime = std::chrono::duration<double>(tg1 - tg0).count();
@@ -366,9 +366,6 @@ template <typename DNA> class GA {
 			}
 			++currentGeneration;
 		}
-#ifdef CLUSTER
-		MPI_Finalize();
-#endif
 	}
 
 // MPI specifics
