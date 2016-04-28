@@ -194,7 +194,6 @@ template <typename DNA> class GA {
 	bool savePopEnabled = true;       // save the whole population?
 	bool saveArchiveEnabled = true;   // save the novelty archive?
 	unsigned int saveInterval = 1;    // interval between 2 whole population saves
-	int procId = 0;
 	string folder = "../evos/";       // where to save the results
 	string evaluatorName;             // name of the given evaluator func
 	double crossoverProba = 0.2;      // crossover probability
@@ -204,6 +203,7 @@ template <typename DNA> class GA {
 	 *                                 SETTERS
 	 ********************************************************************************/
  public:
+	int procId = 0;
 	void enableNovelty() { novelty = true; }
 	void disableNovelty() { novelty = false; }
 	void enablePopulationSave() { savePopEnabled = true; }
