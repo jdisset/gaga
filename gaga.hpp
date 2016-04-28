@@ -64,414 +64,504 @@
 #define GREENBOLD "\033[1;32m"
 #define NORMAL "\033[0m"
 
-namespace GAGA {
-
-using std::vector;
-using std::string;
-using std::unordered_set;
-using std::map;
-using std::unordered_map;
-using std::cout;
-using std::cerr;
-using std::endl;
-using fpType = std::vector<std::vector<double>>;  // footprints for novelty
-using json = nlohmann::json;
-using std::chrono::high_resolution_clock;
-using std::chrono::milliseconds;
-using std::chrono::system_clock;
-
-/******************************************************************************************
- *                                 GAGA LIBRARY
- *****************************************************************************************/
-// This file contains :
-// 1 - the Individual class template : an individual's generic representation, with its
-// dna, fitnesses and
-// behavior footprints (for novelty)
-
-// 2 - the main GA class template
-//
-// About parallelisation :
-// before including this file,
-// #define OMP if you want OpenMP parallelisation
-// #define CLUSTER if you want MPI parallelisation
-
-/*****************************************************************************
- *                         INDIVIDUAL CLASS
- * **************************************************************************/
-// A valid DNA class must have (see examples folder):
-// DNA mutate()
-// DNA crossover(DNA& other)
-// static DNA random(int argc, char** argv)
-// json& constructor
-// void reset()
-// json toJson()
-
-template <typename DNA> struct Individual {
-	DNA dna;
-	map<string, double> fitnesses;  // map {"fitnessCriterName" -> "fitnessValue"}
-	fpType footprint;               // individual's footprint for novelty computation
-	string infos;                   // custom infos, description, whatever...
-	bool evaluated = false;
-	bool wasAlreadyEvaluated = false;
-	double evalTime = 0.0;
-
-	Individual() {}
-	explicit Individual(const DNA &d) : dna(d) {}
-
-	explicit Individual(const json &o) {
-		assert(o.count("dna"));
-		dna = DNA(o.at("dna").dump());
-		if (o.count("footprint")) footprint = o.at("footprint").get<fpType>();
-		if (o.count("fitnesses")) fitnesses = o.at("fitnesses").get<decltype(fitnesses)>();
-		if (o.count("infos")) infos = o.at("infos");
-		if (o.count("evaluated")) evaluated = o.at("evaluated");
-		if (o.count("alreadyEval")) wasAlreadyEvaluated = o.at("alreadyEval");
-		if (o.count("evalTime")) evalTime = o.at("evalTime");
-	}
-
-	// Exports individual to json
-	json toJSON() const {
-		json o;
-		o["dna"] = dna.serialize();
-		o["fitnesses"] = fitnesses;
-		o["footprint"] = footprint;
-		o["infos"] = infos;
-		o["evaluated"] = evaluated;
-		o["alreadyEval"] = wasAlreadyEvaluated;
-		o["evalTime"] = evalTime;
-		return o;
-	}
-
-	// Exports a vector of individual to json
-	static json popToJSON(const vector<Individual<DNA>> &p) {
-		json o;
-		json popArray;
-		for (auto &i : p) popArray.push_back(i.toJSON());
-		o["population"] = popArray;
-		return o;
-	}
-
-	// Loads a vector of individual from json
-	static vector<Individual<DNA>> loadPopFromJSON(const json &o) {
-		assert(o.count("population"));
-		vector<Individual<DNA>> res;
-		json popArray = o.at("population");
-		for (auto &ind : popArray) res.push_back(Individual<DNA>(ind));
-		return res;
-	}
-};
-
-/*********************************************************************************
- *                                 GA CLASS
- ********************************************************************************/
-// DNA requirements : see Individual class;
-//
-// Evaluaor class requirements (see examples folder):
-// constructor(int argc, char** argv)
-// void operator()(const Individual<DNA>& ind)
-// const string name
-//
-// TYPICAL USAGE :
-//
-// GA<DNAType, EvalType> ga;
-// ga.setPopSize(400);
-// return ga.start();
-
-struct Greater
+namespace GAGA
 {
-    bool operator()(double a, double b) const
+
+    using std::vector;
+    using std::string;
+    using std::unordered_set;
+    using std::map;
+    using std::unordered_map;
+    using std::cout;
+    using std::cerr;
+    using std::endl;
+    using fpType = std::vector<std::vector<double>>; // footprints for novelty
+    using json   = nlohmann::json;
+    using std::chrono::high_resolution_clock;
+    using std::chrono::milliseconds;
+    using std::chrono::system_clock;
+
+    /******************************************************************************************
+     *                                 GAGA LIBRARY
+     *****************************************************************************************/
+    // This file contains :
+    // 1 - the Individual class template : an individual's generic representation, with its
+    // dna, fitnesses and
+    // behavior footprints (for novelty)
+
+    // 2 - the main GA class template
+    //
+    // About parallelisation :
+    // before including this file,
+    // #define OMP if you want OpenMP parallelisation
+    // #define CLUSTER if you want MPI parallelisation
+
+    /*****************************************************************************
+     *                         INDIVIDUAL CLASS
+     * **************************************************************************/
+    // A valid DNA class must have (see examples folder):
+    // DNA mutate()
+    // DNA crossover(DNA& other)
+    // static DNA random(int argc, char** argv)
+    // json& constructor
+    // void reset()
+    // json toJson()
+
+    template <typename DNA> struct Individual
     {
-        return a > b;
-    }
-};
+        DNA dna;
+        map<string, double> fitnesses; // map {"fitnessCriterName" -> "fitnessValue"}
+        fpType footprint;              // individual's footprint for novelty computation
+        string infos;                  // custom infos, description, whatever...
+        bool evaluated           = false;
+        bool wasAlreadyEvaluated = false;
+        double evalTime          = 0.0;
 
-enum class SelectionMethod { paretoTournament, randomObjTournament, paretoDistanceTournament };
-template <typename DNA, typename IsBetterOp = Greater> class GA {
- protected:
-	/*********************************************************************************
-	 *                            MAIN GA SETTINGS
-	 ********************************************************************************/
-    IsBetterOp isBetter;
+        Individual()
+        {
+        }
+        explicit Individual(const DNA& d)
+            : dna(d)
+        {
+        }
 
-	bool novelty = false;  // is novelty enabled ?
-	unsigned int verbosity =
-	    2;  // 0 = silent; 1 = generations stats; 2 = individuals stats; 3 = everything
-	size_t popSize = 500;             // nb of individuals in the population
-	size_t nbElites = 1;              // nb of elites to keep accross generations
-	size_t nbSavedElites = 1;         // nb of elites to save
-	size_t tournamentSize = 3;        // nb of competitors in tournament
-	double minNoveltyForArchive = 1;  // min novelty for being added to the general archive
-	size_t KNN = 15;                  // size of the neighbourhood for novelty
-	bool savePopEnabled = true;       // save the whole population?
-	bool saveArchiveEnabled = true;   // save the novelty archive?
-	unsigned int saveInterval = 1;    // interval between 2 whole population saves
-	string folder = "../evos/";       // where to save the results
-	string evaluatorName;             // name of the given evaluator func
-	double crossoverProba = 0.2;      // crossover probability
-	double mutationProba = 0.5;       // mutation probablility
-	SelectionMethod selecMethod = SelectionMethod::randomObjTournament;
-	/********************************************************************************
-	 *                                 SETTERS
-	 ********************************************************************************/
- public:
-	using DNA_t = DNA;
-	void enableNovelty() { novelty = true; }
-	void disableNovelty() { novelty = false; }
-	void enablePopulationSave() { savePopEnabled = true; }
-	void disablePopulationSave() { savePopEnabled = false; }
-	void enableArchiveSave() { saveArchiveEnabled = true; }
-	void disableArchiveSave() { saveArchiveEnabled = false; }
-	void setVerbosity(unsigned int lvl) { verbosity = lvl <= 3 ? (lvl >= 0 ? lvl : 0) : 3; }
-	void setPopSize(size_t s) { popSize = s; }
-	void setNbElites(size_t n) { nbElites = n; }
-	void setNbSavedElites(size_t n) { nbSavedElites = n; }
-	void setTournamentSize(size_t n) { tournamentSize = n; }
-	void setKNN(size_t n) { KNN = n; }
-	void setPopSaveInterval(unsigned int n) { saveInterval = n; }
-	void setSaveFolder(string s) { folder = s; }
-	void setCrossoverProba(double p) {
-		crossoverProba = p <= 1.0 ? (p >= 0.0 ? p : 0.0) : 1.0;
-	}
-	void setMutationProba(double p) {
-		mutationProba = p <= 1.0 ? (p >= 0.0 ? p : 0.0) : 1.0;
-	}
-	void setEvaluator(std::function<void(Individual<DNA> &)> e,
-	                  std::string ename = "anonymousEvaluator") {
-		evaluator = e;
-		evaluatorName = ename;
-	}
-	void setMinNoveltyForArchive(double m) { minNoveltyForArchive = m; }
-	void setSelectionMethod(const SelectionMethod &sm) {
-		selecMethod = sm;
-		switch (sm) {
-			case SelectionMethod::paretoTournament:
-            case SelectionMethod::paretoDistanceTournament:
-				selection = [this]() { return paretoTournament(); };
-				break;
+        explicit Individual(const json& o)
+        {
+            assert(o.count("dna"));
+            dna = DNA(o.at("dna").dump());
+            if (o.count("footprint")) footprint = o.at("footprint").get<fpType>();
+            if (o.count("fitnesses")) fitnesses = o.at("fitnesses").get<decltype(fitnesses)>();
+            if (o.count("infos")) infos = o.at("infos");
+            if (o.count("evaluated")) evaluated = o.at("evaluated");
+            if (o.count("alreadyEval")) wasAlreadyEvaluated = o.at("alreadyEval");
+            if (o.count("evalTime")) evalTime = o.at("evalTime");
+        }
 
-			case SelectionMethod::randomObjTournament:
-			default:
-				selection = [this]() { return randomObjTournament(); };
-				break;
-		}
-	}
+        // Exports individual to json
+        json toJSON() const
+        {
+            json o;
+            o["dna"]         = dna.serialize();
+            o["fitnesses"]   = fitnesses;
+            o["footprint"]   = footprint;
+            o["infos"]       = infos;
+            o["evaluated"]   = evaluated;
+            o["alreadyEval"] = wasAlreadyEvaluated;
+            o["evalTime"]    = evalTime;
+            return o;
+        }
 
-	vector<Individual<DNA>> population;
+        // Exports a vector of individual to json
+        static json popToJSON(const vector<Individual<DNA>>& p)
+        {
+            json o;
+            json popArray;
+            for (auto& i : p) popArray.push_back(i.toJSON());
+            o["population"] = popArray;
+            return o;
+        }
 
-	////////////////////////////////////////////////////////////////////////////////////
+        // Loads a vector of individual from json
+        static vector<Individual<DNA>> loadPopFromJSON(const json& o)
+        {
+            assert(o.count("population"));
+            vector<Individual<DNA>> res;
+            json popArray = o.at("population");
+            for (auto& ind : popArray) res.push_back(Individual<DNA>(ind));
+            return res;
+        }
+    };
 
- protected:
-	std::function<void(Individual<DNA> &)> evaluator;
-	vector<Individual<DNA>>
-	    archive;  // when novelty is enabled, we store the novel individuals there
-	size_t currentGeneration = 0;
-	bool customInit = false;
-	// openmp/mpi stuff
-	int procId = 0;
-	int nbProcs = 1;
-	int argc = 1;
-	char **argv = nullptr;
+    /*********************************************************************************
+     *                                 GA CLASS
+     ********************************************************************************/
+    // DNA requirements : see Individual class;
+    //
+    // Evaluaor class requirements (see examples folder):
+    // constructor(int argc, char** argv)
+    // void operator()(const Individual<DNA>& ind)
+    // const string name
+    //
+    // TYPICAL USAGE :
+    //
+    // GA<DNAType, EvalType> ga;
+    // ga.setPopSize(400);
+    // return ga.start();
 
-	std::vector<std::map<std::string, std::map<std::string, double>>> genStats;
+    struct Greater
+    {
+        bool operator()(double a, double b) const
+        {
+            return a > b;
+        }
+    };
 
-	std::random_device rd;
-	std::default_random_engine globalRand = std::default_random_engine(rd());
+    enum class SelectionMethod
+    {
+        paretoTournament,
+        randomObjTournament,
+        paretoDistanceTournament
+    };
+    template <typename DNA, typename IsBetterOp = Greater> class GA
+    {
+    protected:
+        /*********************************************************************************
+         *                            MAIN GA SETTINGS
+         ********************************************************************************/
+        IsBetterOp isBetter;
 
-	std::function<Individual<DNA> *()> selection;
+        bool novelty                = false;      // is novelty enabled ?
+        unsigned int verbosity      = 2;          // 0 = silent; 1 = generations stats; 2 = individuals stats; 3 = everything
+        size_t popSize              = 500;        // nb of individuals in the population
+        size_t nbElites             = 1;          // nb of elites to keep accross generations
+        size_t nbSavedElites        = 1;          // nb of elites to save
+        size_t tournamentSize       = 3;          // nb of competitors in tournament
+        double minNoveltyForArchive = 1;          // min novelty for being added to the general archive
+        size_t KNN                  = 15;         // size of the neighbourhood for novelty
+        bool savePopEnabled         = true;       // save the whole population?
+        bool saveArchiveEnabled     = true;       // save the novelty archive?
+        unsigned int saveInterval   = 1;          // interval between 2 whole population saves
+        string folder               = "../evos/"; // where to save the results
+        string evaluatorName;                     // name of the given evaluator func
+        double crossoverProba       = 0.2;        // crossover probability
+        double mutationProba        = 0.5;        // mutation probablility
+        SelectionMethod selecMethod = SelectionMethod::randomObjTournament;
+        bool evaluateAllIndividuals = false;
+        /********************************************************************************
+         *                                 SETTERS
+         ********************************************************************************/
+    public:
+        void enableNovelty()
+        {
+            novelty = true;
+        }
+        void disableNovelty()
+        {
+            novelty = false;
+        }
+        void enablePopulationSave()
+        {
+            savePopEnabled = true;
+        }
+        void disablePopulationSave()
+        {
+            savePopEnabled = false;
+        }
+        void enableArchiveSave()
+        {
+            saveArchiveEnabled = true;
+        }
+        void disableArchiveSave()
+        {
+            saveArchiveEnabled = false;
+        }
+        void setVerbosity(unsigned int lvl)
+        {
+            verbosity = lvl <= 3 ? (lvl >= 0 ? lvl : 0) : 3;
+        }
+        void setPopSize(size_t s)
+        {
+            popSize = s;
+        }
+        void setNbElites(size_t n)
+        {
+            nbElites = n;
+        }
+        void setNbSavedElites(size_t n)
+        {
+            nbSavedElites = n;
+        }
+        void setTournamentSize(size_t n)
+        {
+            tournamentSize = n;
+        }
+        void setKNN(size_t n)
+        {
+            KNN = n;
+        }
+        void setPopSaveInterval(unsigned int n)
+        {
+            saveInterval = n;
+        }
+        void setSaveFolder(string s)
+        {
+            folder = s;
+        }
+        void setCrossoverProba(double p)
+        {
+            crossoverProba = p <= 1.0 ? (p >= 0.0 ? p : 0.0) : 1.0;
+        }
+        void setMutationProba(double p)
+        {
+            mutationProba = p <= 1.0 ? (p >= 0.0 ? p : 0.0) : 1.0;
+        }
+        void setEvaluator(std::function<void(Individual<DNA>&)> e, std::string ename = "anonymousEvaluator")
+        {
+            evaluator     = e;
+            evaluatorName = ename;
+        }
+        void setMinNoveltyForArchive(double m)
+        {
+            minNoveltyForArchive = m;
+        }
+        void setSelectionMethod(const SelectionMethod& sm)
+        {
+            selecMethod = sm;
+            switch (sm)
+            {
+                case SelectionMethod::paretoTournament:
+                case SelectionMethod::paretoDistanceTournament:
+                    selection = [this]()
+                    {
+                        return paretoTournament();
+                    };
+                    break;
 
- public:
-	/*********************************************************************************
-	 *                              CONSTRUCTOR
-	 ********************************************************************************/
-	GA(int ac, char **av) : argc(ac), argv(av) {
-		setSelectionMethod(selecMethod);
+                case SelectionMethod::randomObjTournament:
+                default:
+                    selection = [this]()
+                    {
+                        return randomObjTournament();
+                    };
+                    break;
+            }
+        }
+        void setEvaluateAllIndividuals(bool m)
+        {
+            evaluateAllIndividuals = m;
+        }
+
+        vector<Individual<DNA>> population;
+
+        ////////////////////////////////////////////////////////////////////////////////////
+
+    protected:
+        std::function<void(Individual<DNA>&)> evaluator;
+        vector<Individual<DNA>> archive; // when novelty is enabled, we store the novel individuals there
+        size_t currentGeneration = 0;
+        bool customInit          = false;
+        // openmp/mpi stuff
+        int procId  = 0;
+        int nbProcs = 1;
+        int argc    = 1;
+        char** argv = nullptr;
+
+        std::vector<std::map<std::string, std::map<std::string, double>>> genStats;
+
+        std::random_device rd;
+        std::default_random_engine globalRand = std::default_random_engine(rd());
+
+        std::function<Individual<DNA>*()> selection;
+
+    public:
+        /*********************************************************************************
+         *                              CONSTRUCTOR
+         ********************************************************************************/
+        GA(int ac, char** av)
+            : argc(ac)
+            , argv(av)
+        {
+            setSelectionMethod(selecMethod);
 #ifdef CLUSTER
-		MPI_Init(&argc, &argv);
-		MPI_Comm_size(MPI_COMM_WORLD, &nbProcs);
-		MPI_Comm_rank(MPI_COMM_WORLD, &procId);
-		if (procId == 0) {
-			if (verbosity >= 3) {
-				cout << "   -------------------" << endl;
-				cout << CYAN << " MPI STARTED WITH " << NORMAL << nbProcs << CYAN << " PROCS "
-				     << NORMAL << endl;
-				cout << "   -------------------" << endl;
-				cout << "Initialising population in master process" << endl;
-			}
-		}
+            MPI_Init(&argc, &argv);
+            MPI_Comm_size(MPI_COMM_WORLD, &nbProcs);
+            MPI_Comm_rank(MPI_COMM_WORLD, &procId);
+            if (procId == 0)
+            {
+                if (verbosity >= 3)
+                {
+                    cout << "   -------------------" << endl;
+                    cout << CYAN << " MPI STARTED WITH " << NORMAL << nbProcs << CYAN << " PROCS " << NORMAL << endl;
+                    cout << "   -------------------" << endl;
+                    cout << "Initialising population in master process" << endl;
+                }
+            }
 #endif
-	}
+        }
 
-	/*********************************************************************************
-	 *                          START THE BOUZIN
-	 ********************************************************************************/
-	void setPopulation(const vector<Individual<DNA>> &p) {
-		if (procId == 0) {
-			population = p;
-			if (population.size() != popSize)
-				throw std::invalid_argument("Population doesn't match the popSize param");
-			popSize = population.size();
-		}
-	}
+        /*********************************************************************************
+         *                          START THE BOUZIN
+         ********************************************************************************/
+        void setPopulation(const vector<Individual<DNA>>& p)
+        {
+            population = p;
+            if (population.size() != popSize) throw std::invalid_argument("Population doesn't match the popSize param");
+            popSize = population.size();
+        }
 
-	void initPopulation(const std::function<DNA()> &f) {
-		if (procId == 0) {
-			population.reserve(popSize);
-			for (size_t i = 0; i < popSize; ++i) {
-				population.push_back(Individual<DNA>(f()));
-				population[population.size() - 1].evaluated = false;
-			}
-		}
-	}
-
-	// "Vroum vroum"
-	void step(int nbGeneration = 1) {
-		if (!evaluator) throw std::invalid_argument("No evaluator specified");
-		if (currentGeneration == 0 && procId == 0) {
-			createFolder(folder);
-			if (verbosity >= 1) printStart();
-		}
-		for (int nbg = 0; nbg < nbGeneration; ++nbg) {
-			auto tg0 = high_resolution_clock::now();
+        void initPopulation(const std::function<DNA()>& f)
+        {
+            population.reserve(popSize);
+            for (size_t i = 0; i < popSize; ++i)
+            {
+                population.push_back(Individual<DNA>(f()));
+                population[population.size() - 1].evaluated = false;
+            }
+        }
+        // "Vroum vroum"
+        void step(int nbGeneration = 1)
+        {
+            if (population.size() != popSize) throw std::invalid_argument("Population doesn't match the popSize param");
+            if (!evaluator) throw std::invalid_argument("No evaluator specified");
+            if (procId == 0)
+            {
+                createFolder(folder);
+                if (verbosity >= 1) printStart();
+            }
+            for (int nbg = 0; nbg < nbGeneration; ++nbg)
+            {
+                auto tg0 = high_resolution_clock::now();
 #ifdef CLUSTER
-			MPI_distributePopulation();
+                MPI_distributePopulation();
 #endif
 #ifdef OMP
 #pragma omp parallel for schedule(dynamic, 2)
 #endif
-			for (size_t i = 0; i < population.size(); ++i) {
-				if (!population[i].evaluated) {
-					auto t0 = high_resolution_clock::now();
-					population[i].dna.reset();
-					evaluator(population[i]);
-					auto t1 = high_resolution_clock::now();
-					population[i].evaluated = true;
-					double indTime = std::chrono::duration<double>(t1 - t0).count();
-					population[i].evalTime = indTime;
-					population[i].wasAlreadyEvaluated = false;
-				} else {
-					population[i].evalTime = 0.0;
-					population[i].wasAlreadyEvaluated = true;
-				}
-				if (verbosity >= 2) printIndividualStats(population[i]);
-			}
+                for (size_t i = 0; i < population.size(); ++i)
+                {
+                    if (evaluateAllIndividuals || !population[i].evaluated)
+                    {
+                        auto t0 = high_resolution_clock::now();
+                        population[i].dna.reset();
+                        evaluator(population[i]);
+                        auto t1                           = high_resolution_clock::now();
+                        population[i].evaluated           = true;
+                        double indTime                    = std::chrono::duration<double>(t1 - t0).count();
+                        population[i].evalTime            = indTime;
+                        population[i].wasAlreadyEvaluated = false;
+                    }
+                    else
+                    {
+                        population[i].evalTime            = 0.0;
+                        population[i].wasAlreadyEvaluated = true;
+                    }
+                    if (verbosity >= 2) printIndividualStats(population[i]);
+                }
 #ifdef CLUSTER
-			MPI_receivePopulation();
+                MPI_receivePopulation();
 #endif
-			if (procId == 0) {
-				if (population.size() != popSize)
-					throw std::invalid_argument("Population doesn't match the popSize param");
-				if (novelty) updateNovelty();
-				auto tg1 = high_resolution_clock::now();
-				double totalTime = std::chrono::duration<double>(tg1 - tg0).count();
-				updateStats(totalTime);
-				auto tnp0 = high_resolution_clock::now();
-				if (currentGeneration % saveInterval == 0) {
-					if (savePopEnabled) savePop();
-					if (novelty && saveArchiveEnabled) saveArchive();
-				}
-				if (verbosity >= 1) printGenStats(currentGeneration);
-				saveBests(nbSavedElites);
-				saveStats();
-				prepareNextPop();
-				auto tnp1 = high_resolution_clock::now();
-				double tnp = std::chrono::duration<double>(tnp1 - tnp0).count();
-				if (verbosity >= 2) {
-					std::cout << "Time for save + next pop = " << tnp << " s." << std::endl;
-				}
-			}
-			++currentGeneration;
-		}
-	}
-
-	void finish() {
+                if (procId == 0)
+                {
+                    if (novelty) updateNovelty();
+                    auto tg1         = high_resolution_clock::now();
+                    double totalTime = std::chrono::duration<double>(tg1 - tg0).count();
+                    updateStats(totalTime);
+                    auto tnp0 = high_resolution_clock::now();
+                    if (currentGeneration % saveInterval == 0)
+                    {
+                        if (savePopEnabled) savePop();
+                        if (novelty && saveArchiveEnabled) saveArchive();
+                    }
+                    if (verbosity >= 1) printGenStats(currentGeneration);
+                    saveBests(nbSavedElites);
+                    saveStats();
+                    prepareNextPop();
+                    auto tnp1  = high_resolution_clock::now();
+                    double tnp = std::chrono::duration<double>(tnp1 - tnp0).count();
+                    if (verbosity >= 2)
+                    {
+                        std::cout << "Time for save + next pop = " << tnp << " s." << std::endl;
+                    }
+                }
+                ++currentGeneration;
+            }
 #ifdef CLUSTER
-		MPI_Finalize();
+            MPI_Finalize();
 #endif
-	}
+        }
 
 // MPI specifics
 #ifdef CLUSTER
-	void MPI_distributePopulation() {
-		if (procId == 0) {
-			// if we're in the master process, we send b(i)atches to the others.
-			// master will have the remaining
-			size_t batchSize = population.size() / nbProcs;
-			for (size_t dest = 1; dest < (size_t)nbProcs; ++dest) {
-				vector<Individual<DNA>> batch;
-				for (size_t ind = 0; ind < batchSize; ++ind) {
-					batch.push_back(population.back());
-					population.pop_back();
-				}
-				string batchStr = Individual<DNA>::popToJSON(batch).dump();
-				std::vector<char> tmp(batchStr.begin(), batchStr.end());
-				tmp.push_back('\0');
-				MPI_Send(tmp.data(), tmp.size(), MPI_BYTE, dest, 0, MPI_COMM_WORLD);
-			}
-		} else {
-			// we're in a slave process, we welcome our local population !
-			int strLength;
-			MPI_Status status;
-			MPI_Probe(0, 0, MPI_COMM_WORLD, &status);  // we want to know its size
-			MPI_Get_count(&status, MPI_CHAR, &strLength);
-			char *popChar = new char[strLength + 1];
-			MPI_Recv(popChar, strLength, MPI_BYTE, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-			// and we dejsonize !
-			auto o = json::parse(popChar);
-			population = Individual<DNA>::loadPopFromJSON(o);  // welcome bros!
-			if (verbosity >= 3) {
-				std::ostringstream buf;
-				buf << endl
-				    << "Proc " << PURPLE << procId << NORMAL << " : reception of "
-				    << population.size() << " new individuals !" << endl;
-				cout << buf.str();
-			}
-		}
-	}
+        void MPI_distributePopulation()
+        {
+            if (procId == 0)
+            {
+                // if we're in the master process, we send b(i)atches to the others.
+                // master will have the remaining
+                size_t batchSize = population.size() / nbProcs;
+                for (size_t dest = 1; dest < (size_t)nbProcs; ++dest)
+                {
+                    vector<Individual<DNA>> batch;
+                    for (size_t ind = 0; ind < batchSize; ++ind)
+                    {
+                        batch.push_back(population.back());
+                        population.pop_back();
+                    }
+                    string batchStr = Individual<DNA>::popToJSON(batch).dump();
+                    std::vector<char> tmp(batchStr.begin(), batchStr.end());
+                    tmp.push_back('\0');
+                    MPI_Send(tmp.data(), tmp.size(), MPI_BYTE, dest, 0, MPI_COMM_WORLD);
+                }
+            }
+            else
+            {
+                // we're in a slave process, we welcome our local population !
+                int strLength;
+                MPI_Status status;
+                MPI_Probe(0, 0, MPI_COMM_WORLD, &status); // we want to know its size
+                MPI_Get_count(&status, MPI_CHAR, &strLength);
+                char* popChar = new char[strLength + 1];
+                MPI_Recv(popChar, strLength, MPI_BYTE, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                // and we dejsonize !
+                auto o     = json::parse(popChar);
+                population = Individual<DNA>::loadPopFromJSON(o); // welcome bros!
+                if (verbosity >= 3)
+                {
+                    std::ostringstream buf;
+                    buf << endl << "Proc " << PURPLE << procId << NORMAL << " : reception of " << population.size() << " new individuals !" << endl;
+                    cout << buf.str();
+                }
+            }
+        }
 
-	void MPI_receivePopulation() {
-		if (procId != 0) {  // if slave process we send our population to our mighty leader
-			string batchStr = Individual<DNA>::popToJSON(population).dump();
-			std::vector<char> tmp(batchStr.begin(), batchStr.end());
-			tmp.push_back('\0');
-			MPI_Send(tmp.data(), tmp.size(), MPI_BYTE, 0, 0, MPI_COMM_WORLD);
-		} else {
-			// master process receives all other batches
-			for (size_t source = 1; source < (size_t)nbProcs; ++source) {
-				int strLength;
-				MPI_Status status;
-				MPI_Probe(source, 0, MPI_COMM_WORLD, &status);  // determining batch size
-				MPI_Get_count(&status, MPI_CHAR, &strLength);
-				char *popChar = new char[strLength + 1];
-				MPI_Recv(popChar, strLength + 1, MPI_BYTE, source, 0, MPI_COMM_WORLD,
-				         MPI_STATUS_IGNORE);
-				// and we dejsonize!
-				auto o = json::parse(popChar);
-				vector<Individual<DNA>> batch = Individual<DNA>::loadPopFromJSON(o);
-				population.insert(population.end(), batch.begin(), batch.end());
-				delete popChar;
-				if (verbosity >= 3) {
-					cout << endl
-					     << "Proc " << procId << " : reception of " << batch.size()
-					     << " treated individuals from proc " << source << endl;
-				}
-			}
-		}
-	}
+        void MPI_receivePopulation()
+        {
+            if (procId != 0)
+            { // if slave process we send our population to our mighty leader
+                string batchStr = Individual<DNA>::popToJSON(population).dump();
+                std::vector<char> tmp(batchStr.begin(), batchStr.end());
+                tmp.push_back('\0');
+                MPI_Send(tmp.data(), tmp.size(), MPI_BYTE, 0, 0, MPI_COMM_WORLD);
+            }
+            else
+            {
+                // master process receives all other batches
+                for (size_t source = 1; source < (size_t)nbProcs; ++source)
+                {
+                    int strLength;
+                    MPI_Status status;
+                    MPI_Probe(source, 0, MPI_COMM_WORLD, &status); // determining batch size
+                    MPI_Get_count(&status, MPI_CHAR, &strLength);
+                    char* popChar = new char[strLength + 1];
+                    MPI_Recv(popChar, strLength + 1, MPI_BYTE, source, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                    // and we dejsonize!
+                    auto o                        = json::parse(popChar);
+                    vector<Individual<DNA>> batch = Individual<DNA>::loadPopFromJSON(o);
+                    population.insert(population.end(), batch.begin(), batch.end());
+                    delete popChar;
+                    if (verbosity >= 3)
+                    {
+                        cout << endl << "Proc " << procId << " : reception of " << batch.size() << " treated individuals from proc " << source << endl;
+                    }
+                }
+            }
+        }
 #endif
-	/*********************************************************************************
-	 *                            NEXT POP GETTING READY
-	 ********************************************************************************/
-	// Là où qu'on fait les bébés.
-	void prepareNextPop() {
-		assert(tournamentSize > 0);
-		assert(population.size() == popSize);
-		vector<Individual<DNA>> nextGen;
-		nextGen.reserve(popSize);
-		std::uniform_real_distribution<double> d(0.0, 1.0);
-		// elitism
-		auto elites = getElites(nbElites);
-		for (auto &e : elites)
-			for (auto &i : e.second) nextGen.push_back(i);
+        /*********************************************************************************
+         *                            NEXT POP GETTING READY
+         ********************************************************************************/
+        // Là où qu'on fait les bébés.
+        void prepareNextPop()
+        {
+            assert(tournamentSize > 0);
+            assert(population.size() == popSize);
+            vector<Individual<DNA>> nextGen;
+            nextGen.reserve(popSize);
+            std::uniform_real_distribution<double> d(0.0, 1.0);
+            // elitism
+            auto elites = getElites(nbElites);
+            for (auto& e : elites)
+                for (auto& i : e.second) nextGen.push_back(i);
 
 		if (verbosity >= 3) cerr << "preparing rest of the population" << endl;
 		while (nextGen.size() < popSize) {
