@@ -131,7 +131,7 @@ template <typename DNA> struct Individual {
 	// Exports individual to json
 	json toJSON() const {
 		json o;
-		o["dna"] = json::parse(dna.serialize());
+		o["dna"] = dna.serialize();
 		o["fitnesses"] = fitnesses;
 		o["footprint"] = footprint;
 		o["infos"] = infos;
