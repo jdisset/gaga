@@ -203,7 +203,6 @@ template <typename DNA> class GA {
 	 *                                 SETTERS
 	 ********************************************************************************/
  public:
-	int procId = 0;
 	void enableNovelty() { novelty = true; }
 	void disableNovelty() { novelty = false; }
 	void enablePopulationSave() { savePopEnabled = true; }
@@ -254,6 +253,7 @@ template <typename DNA> class GA {
 	size_t currentGeneration = 0;
 	bool customInit = false;
 	// openmp/mpi stuff
+	int procId = 0;
 	int nbProcs = 1;
 	int argc = 1;
 	char **argv = nullptr;
@@ -295,23 +295,28 @@ template <typename DNA> class GA {
 	 *                          START THE BOUZIN
 	 ********************************************************************************/
 	void setPopulation(const vector<Individual<DNA>> &p) {
-		population = p;
-		if (population.size() != popSize)
-			throw std::invalid_argument("Population doesn't match the popSize param");
-		popSize = population.size();
+		if (procId == 0) {
+			population = p;
+			if (population.size() != popSize)
+				throw std::invalid_argument("Population doesn't match the popSize param");
+			popSize = population.size();
+		}
 	}
 
 	void initPopulation(const std::function<DNA()> &f) {
-		population.reserve(popSize);
-		for (size_t i = 0; i < popSize; ++i) {
-			population.push_back(Individual<DNA>(f()));
-			population[population.size() - 1].evaluated = false;
+		if (procId == 0) {
+			population.reserve(popSize);
+			for (size_t i = 0; i < popSize; ++i) {
+				population.push_back(Individual<DNA>(f()));
+				population[population.size() - 1].evaluated = false;
+			}
 		}
 	}
+
 	// "Vroum vroum"
 	void step(int nbGeneration = 1) {
 		if (!evaluator) throw std::invalid_argument("No evaluator specified");
-		if (procId == 0) {
+		if (currentGeneration == 0 && procId == 0) {
 			createFolder(folder);
 			if (verbosity >= 1) printStart();
 		}
@@ -366,6 +371,12 @@ template <typename DNA> class GA {
 			}
 			++currentGeneration;
 		}
+	}
+
+	void finish() {
+#ifdef CLUSTER
+		MPI_Finalize();
+#endif
 	}
 
 // MPI specifics
