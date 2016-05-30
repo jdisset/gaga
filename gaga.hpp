@@ -300,6 +300,10 @@ namespace GAGA
             evaluator     = e;
             evaluatorName = ename;
         }
+        void setNewGenerationFunction(std::function<void(void)> f)
+        {
+            newGenerationFunction = f;
+        }
         void setMinNoveltyForArchive(double m)
         {
             minNoveltyForArchive = m;
@@ -337,6 +341,7 @@ namespace GAGA
 
     protected:
         std::function<void(Individual<DNA>&)> evaluator;
+        std::function<void(void)> newGenerationFunction;
         vector<Individual<DNA>> archive; // when novelty is enabled, we store the novel individuals there
         size_t currentGeneration = 0;
         bool customInit          = false;
@@ -401,6 +406,7 @@ namespace GAGA
         // "Vroum vroum"
         void step(int nbGeneration = 1)
         {
+            std::cout << "Hello, World";
             if (population.size() != popSize) throw std::invalid_argument("Population doesn't match the popSize param");
             if (!evaluator) throw std::invalid_argument("No evaluator specified");
             if (procId == 0)
@@ -410,6 +416,7 @@ namespace GAGA
             }
             for (int nbg = 0; nbg < nbGeneration; ++nbg)
             {
+                newGenerationFunction();
                 auto tg0 = high_resolution_clock::now();
 #ifdef CLUSTER
                 MPI_distributePopulation();
