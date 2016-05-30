@@ -406,7 +406,6 @@ namespace GAGA
         // "Vroum vroum"
         void step(int nbGeneration = 1)
         {
-            std::cout << "Hello, World";
             if (population.size() != popSize) throw std::invalid_argument("Population doesn't match the popSize param");
             if (!evaluator) throw std::invalid_argument("No evaluator specified");
             if (procId == 0)
