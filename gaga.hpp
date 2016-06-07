@@ -564,6 +564,10 @@ namespace GAGA
             vector<Individual<DNA>> nextGen;
             nextGen.reserve(popSize);
             std::uniform_real_distribution<double> d(0.0, 1.0);
+
+            // Save this generation
+            last_gen = population;
+
             // elitism
             auto elites = getElites(nbElites);
             for (auto& e : elites)
