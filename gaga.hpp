@@ -336,6 +336,7 @@ namespace GAGA
         }
 
         vector<Individual<DNA>> population;
+        vector<Individual<DNA>> last_gen;
 
         ////////////////////////////////////////////////////////////////////////////////////
 
@@ -564,6 +565,10 @@ namespace GAGA
             vector<Individual<DNA>> nextGen;
             nextGen.reserve(popSize);
             std::uniform_real_distribution<double> d(0.0, 1.0);
+
+            // Save this generation
+            last_gen = population;
+
             // elitism
             auto elites = getElites(nbElites);
             for (auto& e : elites)
@@ -688,6 +693,42 @@ namespace GAGA
             return champion;
         }
 
+        unordered_map<string, vector<Individual<DNA>>> getLastGenElites(size_t n)
+        {
+            // returns elites for every objectives
+            vector<string> obj;
+            for (auto& o : last_gen[0].fitnesses) obj.push_back(o.first);
+
+            unordered_map<string, vector<Individual<DNA>>> elites;
+
+            if (selecMethod != SelectionMethod::paretoDistanceTournament)
+            {
+                for (auto& o : obj)
+                {
+                    elites[o] = vector<Individual<DNA>>();
+                    elites[o].push_back(last_gen[0]);
+
+                    size_t worst = 0;
+                    for (size_t i = 1; i < n && i < last_gen.size(); ++i)
+                    {
+                        elites[o].push_back(last_gen[i]);
+                        if (isBetter(elites[o][worst].fitnesses.at(o), last_gen[i].fitnesses.at(o))) worst = i;
+                    }
+                    for (size_t i = n; i < population.size(); ++i)
+                    {
+                        if (isBetter(last_gen[i].fitnesses.at(o), elites[o][worst].fitnesses.at(o)))
+                        {
+                            elites[o][worst] = last_gen[i];
+                            for (size_t j = 0; j < n; ++j)
+                                if (isBetter(elites[o][worst].fitnesses.at(o), elites[o][j].fitnesses.at(o))) worst = j;
+                        }
+                    }
+                }
+            }
+
+            return elites;
+        }
+
         unordered_map<string, vector<Individual<DNA>>> getElites(size_t n)
         {
             // returns elites for every objectives
@@ -709,6 +750,7 @@ namespace GAGA
                 {
                     elites[o] = vector<Individual<DNA>>();
                     elites[o].push_back(population[0]);
+
                     size_t worst = 0;
                     for (size_t i = 1; i < n && i < population.size(); ++i)
                     {
@@ -721,9 +763,7 @@ namespace GAGA
                         {
                             elites[o][worst] = population[i];
                             for (size_t j = 0; j < n; ++j)
-                            {
                                 if (isBetter(elites[o][worst].fitnesses.at(o), elites[o][j].fitnesses.at(o))) worst = j;
-                            }
                         }
                     }
                 }
