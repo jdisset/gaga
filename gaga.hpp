@@ -203,6 +203,7 @@ template <typename DNA> class GA {
 	 *                                 SETTERS
 	 ********************************************************************************/
  public:
+	using DNA_t = DNA;
 	void enableNovelty() { novelty = true; }
 	void disableNovelty() { novelty = false; }
 	void enablePopulationSave() { savePopEnabled = true; }
