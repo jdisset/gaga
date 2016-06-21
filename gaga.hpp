@@ -376,10 +376,10 @@ namespace GAGA
             {
                 if (verbosity >= 3)
                 {
-                    cout << "   -------------------" << endl;
-                    cout << CYAN << " MPI STARTED WITH " << NORMAL << nbProcs << CYAN << " PROCS " << NORMAL << endl;
-                    cout << "   -------------------" << endl;
-                    cout << "Initialising population in master process" << endl;
+                    std::cerr << "   -------------------" << endl;
+                    std::cerr << CYAN << " MPI STARTED WITH " << NORMAL << nbProcs << CYAN << " PROCS " << NORMAL << endl;
+                    std::cerr << "   -------------------" << endl;
+                    std::cerr << "Initialising population in master process" << endl;
                 }
             }
 #endif
@@ -897,7 +897,7 @@ namespace GAGA
                     output << GREY << " ❯ " << endl << NORMAL << ind.infos << endl << " -> Novelty = " << CYAN << avgD << GREY << (added ? " (added to archive)" : " (too low for archive)") << NORMAL;
                     if (verbosity >= 3) output << "Footprint was : " << footprintToString(ind.footprint);
                     output << endl;
-                    std::cout << output.str();
+                    std::cerr << output.str();
                 }
                 ind.fitnesses["novelty"] = avgD;
             }
@@ -907,7 +907,7 @@ namespace GAGA
             {
                 std::stringstream output;
                 output << " Added " << toBeAdded.size() << " new footprints to the archive." << std::endl << "New archive size = " << archive.size() << " (was " << savedArchiveSize << ")." << std::endl;
-                std::cout << output.str() << std::endl;
+                std::cerr << output.str() << std::endl;
             }
             if (verbosity >= 2)
             {
@@ -945,43 +945,43 @@ namespace GAGA
         void printStart()
         {
             int nbCol = 55;
-            std::cout << std::endl << GREY;
-            for (int i = 0; i < nbCol - 1; ++i) std::cout << "━";
-            std::cout << std::endl;
-            std::cout << YELLOW << "              ☀     " << NORMAL << " Starting GAGA " << YELLOW << "    ☀ " << NORMAL;
-            std::cout << std::endl;
-            std::cout << BLUE << "                      ¯\\_ಠ ᴥ ಠ_/¯" << std::endl << GREY;
-            for (int i = 0; i < nbCol - 1; ++i) std::cout << "┄";
-            std::cout << std::endl << NORMAL;
-            std::cout << "  ▹ population size = " << BLUE << popSize << NORMAL << std::endl;
-            std::cout << "  ▹ nb of elites = " << BLUE << nbElites << NORMAL << std::endl;
-            std::cout << "  ▹ nb of tournament competitors = " << BLUE << tournamentSize << NORMAL << std::endl;
-            std::cout << "  ▹ selection = " << BLUE << selectMethodToString(selecMethod) << NORMAL << std::endl;
-            std::cout << "  ▹ mutation rate = " << BLUE << mutationProba << NORMAL << std::endl;
-            std::cout << "  ▹ crossover rate = " << BLUE << crossoverProba << NORMAL << std::endl;
-            std::cout << "  ▹ writing results in " << BLUE << folder << NORMAL << std::endl;
+            std::cerr << std::endl << GREY;
+            for (int i = 0; i < nbCol - 1; ++i) std::cerr << "━";
+            std::cerr << std::endl;
+            std::cerr << YELLOW << "              ☀     " << NORMAL << " Starting GAGA " << YELLOW << "    ☀ " << NORMAL;
+            std::cerr << std::endl;
+            std::cerr << BLUE << "                      ¯\\_ಠ ᴥ ಠ_/¯" << std::endl << GREY;
+            for (int i = 0; i < nbCol - 1; ++i) std::cerr << "┄";
+            std::cerr << std::endl << NORMAL;
+            std::cerr << "  ▹ population size = " << BLUE << popSize << NORMAL << std::endl;
+            std::cerr << "  ▹ nb of elites = " << BLUE << nbElites << NORMAL << std::endl;
+            std::cerr << "  ▹ nb of tournament competitors = " << BLUE << tournamentSize << NORMAL << std::endl;
+            std::cerr << "  ▹ selection = " << BLUE << selectMethodToString(selecMethod) << NORMAL << std::endl;
+            std::cerr << "  ▹ mutation rate = " << BLUE << mutationProba << NORMAL << std::endl;
+            std::cerr << "  ▹ crossover rate = " << BLUE << crossoverProba << NORMAL << std::endl;
+            std::cerr << "  ▹ writing results in " << BLUE << folder << NORMAL << std::endl;
             if (novelty)
             {
-                std::cout << "  ▹ novelty is " << GREEN << "enabled" << NORMAL << std::endl;
-                std::cout << "    - KNN size = " << BLUE << KNN << NORMAL << std::endl;
+                std::cerr << "  ▹ novelty is " << GREEN << "enabled" << NORMAL << std::endl;
+                std::cerr << "    - KNN size = " << BLUE << KNN << NORMAL << std::endl;
             }
             else
             {
-                std::cout << "  ▹ novelty is " << RED << "disabled" << NORMAL << std::endl;
+                std::cerr << "  ▹ novelty is " << RED << "disabled" << NORMAL << std::endl;
             }
 #ifdef CLUSTER
-            std::cout << "  ▹ MPI parallelisation is " << GREEN << "enabled" << NORMAL << std::endl;
+            std::cerr << "  ▹ MPI parallelisation is " << GREEN << "enabled" << NORMAL << std::endl;
 #else
-            std::cout << "  ▹ MPI parallelisation is " << RED << "disabled" << NORMAL << std::endl;
+            std::cerr << "  ▹ MPI parallelisation is " << RED << "disabled" << NORMAL << std::endl;
 #endif
 #ifdef OMP
-            std::cout << "  ▹ OpenMP parallelisation is " << GREEN << "enabled" << NORMAL << std::endl;
+            std::cerr << "  ▹ OpenMP parallelisation is " << GREEN << "enabled" << NORMAL << std::endl;
 #else
-            std::cout << "  ▹ OpenMP parallelisation is " << RED << "disabled" << NORMAL << std::endl;
+            std::cerr << "  ▹ OpenMP parallelisation is " << RED << "disabled" << NORMAL << std::endl;
 #endif
-            std::cout << GREY;
-            for (int i = 0; i < nbCol - 1; ++i) std::cout << "━";
-            std::cout << NORMAL << std::endl;
+            std::cerr << GREY;
+            for (int i = 0; i < nbCol - 1; ++i) std::cerr << "━";
+            std::cerr << NORMAL << std::endl;
         }
         void updateStats(double totalTime)
         {
@@ -1020,32 +1020,32 @@ namespace GAGA
         void printGenStats(size_t n)
         {
             const size_t l = 80;
-            std::cout << tableHeader(l);
+            std::cerr << tableHeader(l);
             std::ostringstream output;
             const auto& globalStats = genStats[n].at("global");
             output << "Generation " << CYANBOLD << n << NORMAL << " ended in " << BLUE << globalStats.at("genTotalTime") << NORMAL << "s";
-            std::cout << tableCenteredText(l, output.str(), BLUEBOLD NORMAL BLUE NORMAL);
+            std::cerr << tableCenteredText(l, output.str(), BLUEBOLD NORMAL BLUE NORMAL);
             output = std::ostringstream();
             output << GREYBOLD << "(" << globalStats.at("nEvals") << " evaluations, " << globalStats.at("nObjs") << " objs)" << NORMAL;
-            std::cout << tableCenteredText(l, output.str(), GREYBOLD NORMAL);
-            std::cout << tableSeparation(l);
+            std::cerr << tableCenteredText(l, output.str(), GREYBOLD NORMAL);
+            std::cerr << tableSeparation(l);
             double timeRatio = 0;
             if (globalStats.at("genTotalTime") > 0) timeRatio = globalStats.at("indTotalTime") / globalStats.at("genTotalTime");
             output = std::ostringstream();
             output << "🕝  max: " << BLUE << globalStats.at("maxTime") << NORMAL << "s";
             output << ", 🕝  sum: " << BLUEBOLD << globalStats.at("indTotalTime") << NORMAL << "s (x" << timeRatio << " ratio)";
-            std::cout << tableCenteredText(l, output.str(), CYANBOLD NORMAL BLUE NORMAL "      ");
-            std::cout << tableSeparation(l);
+            std::cerr << tableCenteredText(l, output.str(), CYANBOLD NORMAL BLUE NORMAL "      ");
+            std::cerr << tableSeparation(l);
             for (const auto& o : genStats[n])
             {
                 if (o.first != "global")
                 {
                     output = std::ostringstream();
                     output << GREYBOLD << "--◇" << GREENBOLD << std::setw(10) << o.first << GREYBOLD << " ❯ " << NORMAL << " worst: " << YELLOW << std::setw(12) << o.second.at("worst") << NORMAL << ", avg: " << YELLOWBOLD << std::setw(12) << o.second.at("avg") << NORMAL << ", best: " << REDBOLD << std::setw(12) << o.second.at("best") << NORMAL;
-                    std::cout << tableText(l, output.str(), "    " GREYBOLD GREENBOLD GREYBOLD NORMAL YELLOWBOLD NORMAL YELLOW NORMAL GREENBOLD NORMAL);
+                    std::cerr << tableText(l, output.str(), "    " GREYBOLD GREENBOLD GREYBOLD NORMAL YELLOWBOLD NORMAL YELLOW NORMAL GREENBOLD NORMAL);
                 }
             }
-            std::cout << tableFooter(l);
+            std::cerr << tableFooter(l);
         }
 
         void printIndividualStats(const Individual<DNA>& ind)
@@ -1059,7 +1059,7 @@ namespace GAGA
             else
                 output << "\n";
             if ((!novelty && verbosity >= 2) || verbosity >= 3) output << ind.infos << std::endl;
-            std::cout << output.str();
+            std::cerr << output.str();
         }
 
         std::string tableHeader(unsigned int l)
