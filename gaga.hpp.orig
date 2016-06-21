@@ -121,7 +121,11 @@ namespace GAGA
         {
         }
         explicit Individual(const DNA& d)
+<<<<<<< HEAD
                 : dna(d)
+=======
+            : dna(d)
+>>>>>>> 3af29fcf28e06ea4143955ed084aafd61bfbb7e5
         {
         }
 
@@ -141,7 +145,11 @@ namespace GAGA
         json toJSON() const
         {
             json o;
+<<<<<<< HEAD
             o["dna"]         = dna.serialize();
+=======
+            o["dna"]         = json::parse(dna.toJSON());
+>>>>>>> 3af29fcf28e06ea4143955ed084aafd61bfbb7e5
             o["fitnesses"]   = fitnesses;
             o["footprint"]   = footprint;
             o["infos"]       = infos;
@@ -200,7 +208,12 @@ namespace GAGA
     {
         paretoTournament,
         randomObjTournament,
+        paretoDistanceTournament
+<<<<<<< HEAD
+            };
+=======
     };
+>>>>>>> 3af29fcf28e06ea4143955ed084aafd61bfbb7e5
     template <typename DNA, typename IsBetterOp = Greater> class GA
     {
     protected:
@@ -230,6 +243,7 @@ namespace GAGA
          *                                 SETTERS
          ********************************************************************************/
     public:
+<<<<<<< HEAD
         using DNA_t = DNA;
         void enableNovelty() { novelty = true; }
         void disableNovelty() { novelty = false; }
@@ -246,6 +260,66 @@ namespace GAGA
         void setPopSaveInterval(unsigned int n) { saveInterval = n; }
         void setSaveFolder(string s) { folder = s; }
         void setCrossoverProba(double p) {
+=======
+        void enableNovelty()
+        {
+            novelty = true;
+        }
+        void disableNovelty()
+        {
+            novelty = false;
+        }
+        void enablePopulationSave()
+        {
+            savePopEnabled = true;
+        }
+        void disablePopulationSave()
+        {
+            savePopEnabled = false;
+        }
+        void enableArchiveSave()
+        {
+            saveArchiveEnabled = true;
+        }
+        void disableArchiveSave()
+        {
+            saveArchiveEnabled = false;
+        }
+        void setVerbosity(unsigned int lvl)
+        {
+            verbosity = lvl <= 3 ? (lvl >= 0 ? lvl : 0) : 3;
+        }
+        void setPopSize(size_t s)
+        {
+            popSize = s;
+        }
+        void setNbElites(size_t n)
+        {
+            nbElites = n;
+        }
+        void setNbSavedElites(size_t n)
+        {
+            nbSavedElites = n;
+        }
+        void setTournamentSize(size_t n)
+        {
+            tournamentSize = n;
+        }
+        void setKNN(size_t n)
+        {
+            KNN = n;
+        }
+        void setPopSaveInterval(unsigned int n)
+        {
+            saveInterval = n;
+        }
+        void setSaveFolder(string s)
+        {
+            folder = s;
+        }
+        void setCrossoverProba(double p)
+        {
+>>>>>>> 3af29fcf28e06ea4143955ed084aafd61bfbb7e5
             crossoverProba = p <= 1.0 ? (p >= 0.0 ? p : 0.0) : 1.0;
         }
         void setMutationProba(double p)
@@ -273,17 +347,29 @@ namespace GAGA
                 case SelectionMethod::paretoTournament:
                 case SelectionMethod::paretoDistanceTournament:
                     selection = [this]()
+<<<<<<< HEAD
                         {
                             return paretoTournament();
                         };
+=======
+                    {
+                        return paretoTournament();
+                    };
+>>>>>>> 3af29fcf28e06ea4143955ed084aafd61bfbb7e5
                     break;
 
                 case SelectionMethod::randomObjTournament:
                 default:
                     selection = [this]()
+<<<<<<< HEAD
                         {
                             return randomObjTournament();
                         };
+=======
+                    {
+                        return randomObjTournament();
+                    };
+>>>>>>> 3af29fcf28e06ea4143955ed084aafd61bfbb7e5
                     break;
             }
         }
@@ -321,8 +407,13 @@ namespace GAGA
          *                              CONSTRUCTOR
          ********************************************************************************/
         GA(int ac, char** av)
+<<<<<<< HEAD
                 : argc(ac)
                 , argv(av)
+=======
+            : argc(ac)
+            , argv(av)
+>>>>>>> 3af29fcf28e06ea4143955ed084aafd61bfbb7e5
         {
             setSelectionMethod(selecMethod);
 #ifdef CLUSTER
@@ -345,6 +436,7 @@ namespace GAGA
         /*********************************************************************************
          *                          START THE BOUZIN
          ********************************************************************************/
+<<<<<<< HEAD
         void setPopulation(const vector<Individual<DNA>> &p) {
             if (procId == 0) {
                 population = p;
@@ -368,6 +460,31 @@ namespace GAGA
         void step(int nbGeneration = 1) {
             if (!evaluator) throw std::invalid_argument("No evaluator specified");
             if (currentGeneration == 0 && procId == 0) {
+=======
+        void setPopulation(const vector<Individual<DNA>>& p)
+        {
+            population = p;
+            if (population.size() != popSize) throw std::invalid_argument("Population doesn't match the popSize param");
+            popSize = population.size();
+        }
+
+        void initPopulation(const std::function<DNA()>& f)
+        {
+            population.reserve(popSize);
+            for (size_t i = 0; i < popSize; ++i)
+            {
+                population.push_back(Individual<DNA>(f()));
+                population[population.size() - 1].evaluated = false;
+            }
+        }
+        // "Vroum vroum"
+        void step(int nbGeneration = 1)
+        {
+            if (population.size() != popSize) throw std::invalid_argument("Population doesn't match the popSize param");
+            if (!evaluator) throw std::invalid_argument("No evaluator specified");
+            if (procId == 0)
+            {
+>>>>>>> 3af29fcf28e06ea4143955ed084aafd61bfbb7e5
                 createFolder(folder);
                 if (verbosity >= 1) printStart();
             }
@@ -404,6 +521,7 @@ namespace GAGA
 #ifdef CLUSTER
                 MPI_receivePopulation();
 #endif
+<<<<<<< HEAD
                 if (procId == 0) {
                     if (population.size() != popSize)
                         throw std::invalid_argument("Population doesn't match the popSize param");
@@ -413,6 +531,17 @@ namespace GAGA
                     updateStats(totalTime);
                     auto tnp0 = high_resolution_clock::now();
                     if (currentGeneration % saveInterval == 0) {
+=======
+                if (procId == 0)
+                {
+                    if (novelty) updateNovelty();
+                    auto tg1         = high_resolution_clock::now();
+                    double totalTime = std::chrono::duration<double>(tg1 - tg0).count();
+                    updateStats(totalTime);
+                    auto tnp0 = high_resolution_clock::now();
+                    if (currentGeneration % saveInterval == 0)
+                    {
+>>>>>>> 3af29fcf28e06ea4143955ed084aafd61bfbb7e5
                         if (savePopEnabled) savePop();
                         if (novelty && saveArchiveEnabled) saveArchive();
                     }
@@ -420,17 +549,27 @@ namespace GAGA
                     saveBests(nbSavedElites);
                     saveStats();
                     prepareNextPop();
+<<<<<<< HEAD
                     auto tnp1 = high_resolution_clock::now();
                     double tnp = std::chrono::duration<double>(tnp1 - tnp0).count();
                     if (verbosity >= 2) {
+=======
+                    auto tnp1  = high_resolution_clock::now();
+                    double tnp = std::chrono::duration<double>(tnp1 - tnp0).count();
+                    if (verbosity >= 2)
+                    {
+>>>>>>> 3af29fcf28e06ea4143955ed084aafd61bfbb7e5
                         std::cout << "Time for save + next pop = " << tnp << " s." << std::endl;
                     }
                 }
                 ++currentGeneration;
             }
+<<<<<<< HEAD
         }
 
         void finish() {
+=======
+>>>>>>> 3af29fcf28e06ea4143955ed084aafd61bfbb7e5
 #ifdef CLUSTER
             MPI_Finalize();
 #endif
@@ -438,8 +577,15 @@ namespace GAGA
 
 // MPI specifics
 #ifdef CLUSTER
+<<<<<<< HEAD
         void MPI_distributePopulation() {
             if (procId == 0) {
+=======
+        void MPI_distributePopulation()
+        {
+            if (procId == 0)
+            {
+>>>>>>> 3af29fcf28e06ea4143955ed084aafd61bfbb7e5
                 // if we're in the master process, we send b(i)atches to the others.
                 // master will have the remaining
                 size_t batchSize = population.size() / nbProcs;
@@ -467,6 +613,7 @@ namespace GAGA
                 char* popChar = new char[strLength + 1];
                 MPI_Recv(popChar, strLength, MPI_BYTE, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
                 // and we dejsonize !
+<<<<<<< HEAD
                 auto o = json::parse(popChar);
                 population = Individual<DNA>::loadPopFromJSON(o);  // welcome bros!
                 if (verbosity >= 3) {
@@ -474,17 +621,33 @@ namespace GAGA
                     buf << endl
                         << "Proc " << PURPLE << procId << NORMAL << " : reception of "
                         << population.size() << " new individuals !" << endl;
+=======
+                auto o     = json::parse(popChar);
+                population = Individual<DNA>::loadPopFromJSON(o); // welcome bros!
+                if (verbosity >= 3)
+                {
+                    std::ostringstream buf;
+                    buf << endl << "Proc " << PURPLE << procId << NORMAL << " : reception of " << population.size() << " new individuals !" << endl;
+>>>>>>> 3af29fcf28e06ea4143955ed084aafd61bfbb7e5
                     cout << buf.str();
                 }
             }
         }
 
+<<<<<<< HEAD
         void MPI_receivePopulation() {
             if (procId != 0) {  // if slave process we send our population to our mighty leader
+=======
+        void MPI_receivePopulation()
+        {
+            if (procId != 0)
+            { // if slave process we send our population to our mighty leader
+>>>>>>> 3af29fcf28e06ea4143955ed084aafd61bfbb7e5
                 string batchStr = Individual<DNA>::popToJSON(population).dump();
                 std::vector<char> tmp(batchStr.begin(), batchStr.end());
                 tmp.push_back('\0');
                 MPI_Send(tmp.data(), tmp.size(), MPI_BYTE, 0, 0, MPI_COMM_WORLD);
+<<<<<<< HEAD
             } else {
                 // master process receives all other batches
                 for (size_t source = 1; source < (size_t)nbProcs; ++source) {
@@ -504,6 +667,28 @@ namespace GAGA
                         cout << endl
                              << "Proc " << procId << " : reception of " << batch.size()
                              << " treated individuals from proc " << source << endl;
+=======
+            }
+            else
+            {
+                // master process receives all other batches
+                for (size_t source = 1; source < (size_t)nbProcs; ++source)
+                {
+                    int strLength;
+                    MPI_Status status;
+                    MPI_Probe(source, 0, MPI_COMM_WORLD, &status); // determining batch size
+                    MPI_Get_count(&status, MPI_CHAR, &strLength);
+                    char* popChar = new char[strLength + 1];
+                    MPI_Recv(popChar, strLength + 1, MPI_BYTE, source, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                    // and we dejsonize!
+                    auto o                        = json::parse(popChar);
+                    vector<Individual<DNA>> batch = Individual<DNA>::loadPopFromJSON(o);
+                    population.insert(population.end(), batch.begin(), batch.end());
+                    delete popChar;
+                    if (verbosity >= 3)
+                    {
+                        cout << endl << "Proc " << procId << " : reception of " << batch.size() << " treated individuals from proc " << source << endl;
+>>>>>>> 3af29fcf28e06ea4143955ed084aafd61bfbb7e5
                     }
                 }
             }
@@ -513,7 +698,12 @@ namespace GAGA
          *                            NEXT POP GETTING READY
          ********************************************************************************/
         // Là où qu'on fait les bébés.
+<<<<<<< HEAD
         void prepareNextPop() {
+=======
+        void prepareNextPop()
+        {
+>>>>>>> 3af29fcf28e06ea4143955ed084aafd61bfbb7e5
             assert(tournamentSize > 0);
             assert(population.size() == popSize);
             vector<Individual<DNA>> nextGen;
@@ -525,6 +715,7 @@ namespace GAGA
 
             // elitism
             auto elites = getElites(nbElites);
+<<<<<<< HEAD
             for (auto &e : elites)
                 for (auto &i : e.second) nextGen.push_back(i);
 
@@ -563,28 +754,104 @@ namespace GAGA
             for (auto &o : a.fitnesses)
                 if (!isBetter(o.second, b.fitnesses.at(o.first))) return false;
             return true;
+=======
+            for (auto& e : elites)
+                for (auto& i : e.second) nextGen.push_back(i);
+
+            while (nextGen.size() < popSize)
+            {
+                // selection + crossover
+                Individual<DNA>* p0 = selection();
+                Individual<DNA> offspring;
+                if (d(globalRand) < crossoverProba)
+                {
+                    Individual<DNA>* p1 = selection();
+                    offspring           = Individual<DNA>(p0->dna.crossover(p1->dna));
+                    offspring.evaluated = false;
+                }
+                else
+                {
+                    offspring = *p0;
+                }
+                // mutation
+                if (d(globalRand) < mutationProba)
+                {
+                    offspring.dna.mutate();
+                    offspring.evaluated = false;
+                }
+                nextGen.push_back(offspring);
+            }
+            assert(nextGen.size() == popSize);
+            population = nextGen;
+        }
+
+        bool paretoDominates(const Individual<DNA>& a, const Individual<DNA>& b) const
+        {
+            if (selecMethod == SelectionMethod::paretoTournament)
+            {
+                for (auto& o : a.fitnesses)
+                    if (!isBetter(o.second, b.fitnesses.at(o.first))) return false;
+                return true;
+            }
+            else // paretoDistance
+            {
+                // Compute distance to 0 for a and b
+                double distA = 0.0;
+                double distB = 0.0;
+
+                for (auto& o : a.fitnesses) distA += (o.second * o.second);
+                for (auto& o : b.fitnesses) distB += (o.second * o.second);
+
+                return isBetter(distA, distB);
+            }
+>>>>>>> 3af29fcf28e06ea4143955ed084aafd61bfbb7e5
         }
 
         vector<Individual<DNA>*> getParetoFront(const std::vector<Individual<DNA>*>& ind) const
         {
             // naive algorithm. Should be ok for small ind.size()
+<<<<<<< HEAD
             vector<Individual<DNA> *> pareto;
             for (size_t i = 0; i < ind.size(); ++i) {
                 bool dominated = false;
                 for (auto &j : pareto) {
                     if (paretoDominates(*j, *ind[i])) {
+=======
+            vector<Individual<DNA>*> pareto;
+            for (size_t i = 0; i < ind.size(); ++i)
+            {
+                bool dominated = false;
+                for (auto& j : pareto)
+                {
+                    if (paretoDominates(*j, *ind[i]))
+                    {
+>>>>>>> 3af29fcf28e06ea4143955ed084aafd61bfbb7e5
                         dominated = true;
                         break;
                     }
                 }
+<<<<<<< HEAD
                 if (!dominated) {
                     for (size_t j = i + 1; j < ind.size(); ++j) {
                         if (paretoDominates(*ind[j], *ind[i])) {
+=======
+                if (!dominated)
+                {
+                    for (size_t j = i + 1; j < ind.size(); ++j)
+                    {
+                        if (paretoDominates(*ind[j], *ind[i]))
+                        {
+>>>>>>> 3af29fcf28e06ea4143955ed084aafd61bfbb7e5
                             dominated = true;
                             break;
                         }
                     }
+<<<<<<< HEAD
                     if (!dominated) {
+=======
+                    if (!dominated)
+                    {
+>>>>>>> 3af29fcf28e06ea4143955ed084aafd61bfbb7e5
                         pareto.push_back(ind[i]);
                     }
                 }
@@ -592,17 +859,26 @@ namespace GAGA
             return pareto;
         }
 
+<<<<<<< HEAD
         Individual<DNA> *paretoTournament() {
             std::uniform_int_distribution<size_t> dint(0, population.size() - 1);
             std::vector<Individual<DNA> *> participants;
             for (size_t i = 0; i < tournamentSize; ++i)
                 participants.push_back(&population[dint(globalRand)]);
+=======
+        Individual<DNA>* paretoTournament()
+        {
+            std::uniform_int_distribution<size_t> dint(0, population.size() - 1);
+            std::vector<Individual<DNA>*> participants;
+            for (size_t i = 0; i < tournamentSize; ++i) participants.push_back(&population[dint(globalRand)]);
+>>>>>>> 3af29fcf28e06ea4143955ed084aafd61bfbb7e5
             auto pf = getParetoFront(participants);
             assert(pf.size() > 0);
             std::uniform_int_distribution<size_t> dpf(0, pf.size() - 1);
             return pf[dpf(globalRand)];
         }
 
+<<<<<<< HEAD
         Individual<DNA> *randomObjTournament() {
             if (verbosity >= 3) cerr << "random obj tournament called" << endl;
             std::uniform_int_distribution<size_t> dint(0, population.size() - 1);
@@ -617,15 +893,39 @@ namespace GAGA
             } else {
                 std::uniform_int_distribution<int> dObj(
                     0, static_cast<int>(champion->fitnesses.size()) - 1);
+=======
+        Individual<DNA>* randomObjTournament()
+        {
+            std::uniform_int_distribution<size_t> dint(0, population.size() - 1);
+            std::vector<Individual<DNA>*> participants;
+            for (size_t i = 0; i < tournamentSize; ++i) participants.push_back(&population[dint(globalRand)]);
+            auto champion = participants[0];
+            // we pick the objective randomly
+            std::string obj;
+            if (champion->fitnesses.size() == 1)
+            {
+                obj = champion->fitnesses.begin()->first;
+            }
+            else
+            {
+                std::uniform_int_distribution<int> dObj(0, static_cast<int>(champion->fitnesses.size()) - 1);
+>>>>>>> 3af29fcf28e06ea4143955ed084aafd61bfbb7e5
                 auto it = champion->fitnesses.begin();
                 std::advance(it, dObj(globalRand));
                 obj = it->first;
             }
+<<<<<<< HEAD
             for (size_t i = 1; i < tournamentSize; ++i) {
                 if (isBetter(participants[i]->fitnesses.at(obj), champion->fitnesses.at(obj)))
                     champion = participants[i];
             }
             if (verbosity >= 3) cerr << "champion found" << endl;
+=======
+            for (size_t i = 1; i < tournamentSize; ++i)
+            {
+                if (isBetter(participants[i]->fitnesses.at(obj), champion->fitnesses.at(obj))) champion = participants[i];
+            }
+>>>>>>> 3af29fcf28e06ea4143955ed084aafd61bfbb7e5
             return champion;
         }
 
@@ -679,6 +979,7 @@ namespace GAGA
                 cerr << "getElites : nbObj = " << obj.size() << " n = " << n << endl;
             }
             unordered_map<string, vector<Individual<DNA>>> elites;
+<<<<<<< HEAD
             for (auto &o : obj) {
                 elites[o] = vector<Individual<DNA>>();
                 elites[o].push_back(population[0]);
@@ -694,10 +995,52 @@ namespace GAGA
                         for (size_t j = 0; j < n; ++j) {
                             if (isBetter(elites[o][worst].fitnesses.at(o), elites[o][j].fitnesses.at(o)))
                                 worst = j;
+=======
+
+            if (selecMethod != SelectionMethod::paretoDistanceTournament)
+            {
+                for (auto& o : obj)
+                {
+                    elites[o] = vector<Individual<DNA>>();
+                    elites[o].push_back(population[0]);
+
+                    size_t worst = 0;
+                    for (size_t i = 1; i < n && i < population.size(); ++i)
+                    {
+                        elites[o].push_back(population[i]);
+                        if (isBetter(elites[o][worst].fitnesses.at(o), population[i].fitnesses.at(o))) worst = i;
+                    }
+                    for (size_t i = n; i < population.size(); ++i)
+                    {
+                        if (isBetter(population[i].fitnesses.at(o), elites[o][worst].fitnesses.at(o)))
+                        {
+                            elites[o][worst] = population[i];
+                            for (size_t j = 0; j < n; ++j)
+                                if (isBetter(elites[o][worst].fitnesses.at(o), elites[o][j].fitnesses.at(o))) worst = j;
+>>>>>>> 3af29fcf28e06ea4143955ed084aafd61bfbb7e5
                         }
                     }
                 }
             }
+<<<<<<< HEAD
+=======
+            else
+            {
+                std::vector<Individual<DNA>> el;
+                for (const auto& p : population)
+                {
+                    el.push_back(p);
+                }
+
+                std::sort(el.begin(), el.end(), [&](const Individual<DNA>& a, const Individual<DNA>& b)
+                          {
+                              return paretoDominates(a, b);
+                          });
+                el.resize(n);
+                elites["ParetoFront"] = el;
+            }
+
+>>>>>>> 3af29fcf28e06ea4143955ed084aafd61bfbb7e5
             return elites;
         }
 
@@ -804,6 +1147,7 @@ namespace GAGA
                     toBeAdded.push_back(ind);
                     added = true;
                 }
+<<<<<<< HEAD
                 if (avgD > best.second) best = {&ind, avgD};
                 if (verbosity >= 2) {
                     std::stringstream output;
@@ -815,11 +1159,22 @@ namespace GAGA
                         output << "Footprint was : " << footprintToString(ind.footprint);
                     output << endl;
                     std::cout << output.str();
+=======
+                if (avgD > best.second) best = { &ind, avgD };
+                if (verbosity >= 2)
+                {
+                    std::stringstream output;
+                    output << GREY << " ❯ " << endl << NORMAL << ind.infos << endl << " -> Novelty = " << CYAN << avgD << GREY << (added ? " (added to archive)" : " (too low for archive)") << NORMAL;
+                    if (verbosity >= 3) output << "Footprint was : " << footprintToString(ind.footprint);
+                    output << endl;
+                    std::cerr << output.str();
+>>>>>>> 3af29fcf28e06ea4143955ed084aafd61bfbb7e5
                 }
                 ind.fitnesses["novelty"] = avgD;
             }
             archive.resize(savedArchiveSize);
             archive.insert(std::end(archive), std::begin(toBeAdded), std::end(toBeAdded));
+<<<<<<< HEAD
             if (verbosity >= 2) {
                 std::stringstream output;
                 output << " Added " << toBeAdded.size() << " new footprints to the archive."
@@ -832,21 +1187,49 @@ namespace GAGA
                 std::stringstream output;
                 output << "Most novel individual (novelty = " << best.second
                        << "): " << best.first->infos << endl;
+=======
+            if (verbosity >= 2)
+            {
+                std::stringstream output;
+                output << " Added " << toBeAdded.size() << " new footprints to the archive." << std::endl << "New archive size = " << archive.size() << " (was " << savedArchiveSize << ")." << std::endl;
+                std::cerr << output.str() << std::endl;
+            }
+            if (verbosity >= 2)
+            {
+                std::stringstream output;
+                output << "Most novel individual (novelty = " << best.second << "): " << best.first->infos << endl;
+>>>>>>> 3af29fcf28e06ea4143955ed084aafd61bfbb7e5
                 cout << output.str();
             }
         }
 
         // panpan cucul
+<<<<<<< HEAD
         static inline string footprintToString(const vector<vector<double>> &f) {
+=======
+        static inline string footprintToString(const vector<vector<double>>& f)
+        {
+>>>>>>> 3af29fcf28e06ea4143955ed084aafd61bfbb7e5
             std::ostringstream res;
             res << "👣  " << json(f).dump();
             return res.str();
         }
 
+<<<<<<< HEAD
         string selectMethodToString(const SelectionMethod &sm) {
             switch (sm) {
                 case SelectionMethod::paretoTournament:
                     return "pareto tournament";
+=======
+        string selectMethodToString(const SelectionMethod& sm)
+        {
+            switch (sm)
+            {
+                case SelectionMethod::paretoTournament:
+                    return "pareto tournament";
+                case SelectionMethod::paretoDistanceTournament:
+                    return "pareto distance tournament";
+>>>>>>> 3af29fcf28e06ea4143955ed084aafd61bfbb7e5
                 case SelectionMethod::randomObjTournament:
                     return "random objective tournament";
             }
@@ -955,6 +1338,7 @@ namespace GAGA
                 if (o.first != "global")
                 {
                     output = std::ostringstream();
+<<<<<<< HEAD
                     output << GREYBOLD << "--◇" << GREENBOLD << std::setw(10) << o.first << GREYBOLD
                            << " ❯ " << NORMAL << " worst: " << YELLOW << std::setw(12)
                            << o.second.at("worst") << NORMAL << ", avg: " << YELLOWBOLD
@@ -963,6 +1347,10 @@ namespace GAGA
                     std::cerr << tableText(l, output.str(),
                                            "    " GREYBOLD GREENBOLD GREYBOLD NORMAL YELLOWBOLD NORMAL
 				                           YELLOW NORMAL GREENBOLD NORMAL);
+=======
+                    output << GREYBOLD << "--◇" << GREENBOLD << std::setw(10) << o.first << GREYBOLD << " ❯ " << NORMAL << " worst: " << YELLOW << std::setw(12) << o.second.at("worst") << NORMAL << ", avg: " << YELLOWBOLD << std::setw(12) << o.second.at("avg") << NORMAL << ", best: " << REDBOLD << std::setw(12) << o.second.at("best") << NORMAL;
+                    std::cerr << tableText(l, output.str(), "    " GREYBOLD GREENBOLD GREYBOLD NORMAL YELLOWBOLD NORMAL YELLOW NORMAL GREENBOLD NORMAL);
+>>>>>>> 3af29fcf28e06ea4143955ed084aafd61bfbb7e5
                 }
             }
             std::cerr << tableFooter(l);
@@ -972,9 +1360,13 @@ namespace GAGA
         {
             std::ostringstream output;
             output << GREYBOLD << "[" << YELLOW << procId << GREYBOLD << "]-▶ " << NORMAL;
+<<<<<<< HEAD
             for (const auto &o : ind.fitnesses)
                 output << " " << o.first << ": " << BLUEBOLD << std::setw(12) << o.second << NORMAL
                        << GREYBOLD << " |" << NORMAL;
+=======
+            for (const auto& o : ind.fitnesses) output << " " << o.first << ": " << BLUEBOLD << std::setw(12) << o.second << NORMAL << GREYBOLD << " |" << NORMAL;
+>>>>>>> 3af29fcf28e06ea4143955ed084aafd61bfbb7e5
             output << " 🕝 : " << BLUE << ind.evalTime << "s" << NORMAL;
             if (ind.wasAlreadyEvaluated)
                 output << GREYBOLD << " (already evaluated)\n" << NORMAL;
@@ -1059,6 +1451,7 @@ namespace GAGA
                 for (auto& i : e.second)
                 {
                     std::stringstream fileName;
+<<<<<<< HEAD
                     fileName << baseName.str() << "/" << e.first << "_" << i.fitnesses.at(e.first)
                              << "_" << id++ << ".dna";
                     std::ofstream fs(fileName.str());
@@ -1066,29 +1459,79 @@ namespace GAGA
                         cerr << "Cannot open the output file." << endl;
                     }
                     fs << i.dna.serialize();
+=======
+                    double note;
+                    if (selecMethod != SelectionMethod::paretoDistanceTournament)
+                    {
+                        note = i.fitnesses.at(e.first);
+                    }
+                    else
+                    {
+                        note = 0.0;
+                        for (auto fit : i.fitnesses)
+                        {
+                            note += (fit.second * fit.second);
+                        }
+                    }
+
+                    fileName << baseName.str() << "/" << e.first << "_" << note << "_" << id++ << ".dna";
+
+                    std::ofstream fs(fileName.str());
+                    if (!fs)
+                    {
+                        cerr << "Cannot open the output file." << endl;
+                    }
+                    fs << i.dna.toJSON();
+>>>>>>> 3af29fcf28e06ea4143955ed084aafd61bfbb7e5
                     fs.close();
                 }
             }
         }
 
+<<<<<<< HEAD
         void saveStats() {
+=======
+        void saveStats()
+        {
+>>>>>>> 3af29fcf28e06ea4143955ed084aafd61bfbb7e5
             std::stringstream csv;
             std::stringstream fileName;
             fileName << folder << "/stats.csv";
             csv << "generation";
+<<<<<<< HEAD
             if (genStats.size() > 0) {
                 for (auto &cat : genStats[0]) {
                     std::stringstream column;
                     column << cat.first << "_";
                     for (auto &s : cat.second) {
+=======
+            if (genStats.size() > 0)
+            {
+                for (auto& cat : genStats[0])
+                {
+                    std::stringstream column;
+                    column << cat.first << "_";
+                    for (auto& s : cat.second)
+                    {
+>>>>>>> 3af29fcf28e06ea4143955ed084aafd61bfbb7e5
                         csv << "," << column.str() << s.first;
                     }
                 }
                 csv << endl;
+<<<<<<< HEAD
                 for (size_t i = 0; i < genStats.size(); ++i) {
                     csv << i;
                     for (auto &cat : genStats[i]) {
                         for (auto &s : cat.second) {
+=======
+                for (size_t i = 0; i < genStats.size(); ++i)
+                {
+                    csv << i;
+                    for (auto& cat : genStats[i])
+                    {
+                        for (auto& s : cat.second)
+                        {
+>>>>>>> 3af29fcf28e06ea4143955ed084aafd61bfbb7e5
                             csv << "," << s.second;
                         }
                     }
@@ -1096,25 +1539,45 @@ namespace GAGA
                 }
             }
             std::ofstream fs(fileName.str());
+<<<<<<< HEAD
             if (!fs) {
+=======
+            if (!fs)
+            {
+>>>>>>> 3af29fcf28e06ea4143955ed084aafd61bfbb7e5
                 cerr << "Cannot open the output file." << endl;
             }
             fs << csv.str();
             fs.close();
         }
 
+<<<<<<< HEAD
         void createFolder(string baseFolder) {
             struct stat sb;
             mkdir(baseFolder.c_str(), 0777);
             auto now = system_clock::now();
             time_t now_c = system_clock::to_time_t(now);
             struct tm *parts = localtime(&now_c);
+=======
+        void createFolder(string baseFolder)
+        {
+            struct stat sb;
+            mkdir(baseFolder.c_str(), 0777);
+            auto now         = system_clock::now();
+            time_t now_c     = system_clock::to_time_t(now);
+            struct tm* parts = localtime(&now_c);
+>>>>>>> 3af29fcf28e06ea4143955ed084aafd61bfbb7e5
 
             std::stringstream fname;
             fname << evaluatorName << "_" << parts->tm_mday << "_" << parts->tm_mon + 1 << "_";
             int cpt = 0;
             std::stringstream ftot;
+<<<<<<< HEAD
             do {
+=======
+            do
+            {
+>>>>>>> 3af29fcf28e06ea4143955ed084aafd61bfbb7e5
                 ftot.clear();
                 ftot.str("");
                 ftot << baseFolder << fname.str() << cpt;
@@ -1125,12 +1588,18 @@ namespace GAGA
         }
 
     public:
+<<<<<<< HEAD
         void loadPop(string file) {
+=======
+        void loadPop(string file)
+        {
+>>>>>>> 3af29fcf28e06ea4143955ed084aafd61bfbb7e5
             std::ifstream t(file);
             std::stringstream buffer;
             buffer << t.rdbuf();
             auto o = json::parse(buffer.str());
             assert(o.count("population"));
+<<<<<<< HEAD
             if (o.count("generation")) {
                 currentGeneration = o.at("generation");
             } else {
@@ -1138,14 +1607,34 @@ namespace GAGA
             }
             population.clear();
             for (auto ind : o.at("population")) {
+=======
+            if (o.count("generation"))
+            {
+                currentGeneration = o.at("generation");
+            }
+            else
+            {
+                currentGeneration = 0;
+            }
+            population.clear();
+            for (auto ind : o.at("population"))
+            {
+>>>>>>> 3af29fcf28e06ea4143955ed084aafd61bfbb7e5
                 population.push_back(Individual<DNA>(DNA(ind.at("dna"))));
                 population[population.size() - 1].evaluated = false;
             }
         }
 
+<<<<<<< HEAD
         void savePop() {
             json o = Individual<DNA>::popToJSON(population);
             o["evaluator"] = evaluatorName;
+=======
+        void savePop()
+        {
+            json o          = Individual<DNA>::popToJSON(population);
+            o["evaluator"]  = evaluatorName;
+>>>>>>> 3af29fcf28e06ea4143955ed084aafd61bfbb7e5
             o["generation"] = currentGeneration;
             std::stringstream baseName;
             baseName << folder << "/gen" << currentGeneration;
@@ -1157,8 +1646,14 @@ namespace GAGA
             file << o.dump();
             file.close();
         }
+<<<<<<< HEAD
         void saveArchive() {
             json o = Individual<DNA>::popToJSON(archive);
+=======
+        void saveArchive()
+        {
+            json o         = Individual<DNA>::popToJSON(archive);
+>>>>>>> 3af29fcf28e06ea4143955ed084aafd61bfbb7e5
             o["evaluator"] = evaluatorName;
             std::stringstream baseName;
             baseName << folder << "/gen" << currentGeneration;
@@ -1171,6 +1666,10 @@ namespace GAGA
             file.close();
         }
     };
+<<<<<<< HEAD
 }  // namespace GAGA
+=======
+} // namespace GAGA
+>>>>>>> 3af29fcf28e06ea4143955ed084aafd61bfbb7e5
 #endif
  
