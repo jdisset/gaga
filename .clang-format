@@ -1,0 +1,12 @@
+BasedOnStyle : Google
+UseTab : ForIndentation
+AllowShortIfStatementsOnASingleLine : true
+Cpp11BracedListStyle : true
+Standard : Cpp11
+BreakBeforeTernaryOperators : false
+ConstructorInitializerAllOnOneLineOrOnePerLine : true
+AlwaysBreakTemplateDeclarations : false
+ColumnLimit: 90
+IndentCaseLabels : true
+IndentWrappedFunctionNames : true
+TabWidth : 2
