@@ -37,13 +37,13 @@
 #include <sys/types.h>
 #include <algorithm>
 #include <chrono>
+#include <cstring>
 #include <deque>
 #include <fstream>
 #include <map>
 #include <random>
 #include <sstream>
 #include <string>
-#include <cstring>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -1180,7 +1180,7 @@ template <typename DNA> class GA {
 			cpt++;
 		} while (stat(ftot.str().c_str(), &sb) == 0 && S_ISDIR(sb.st_mode));
 		folder = ftot.str();
-		mkpath(folder.c_str(), 0777);
+		mkdir(folder.c_str(), 0777);
 	}
 
  public:
