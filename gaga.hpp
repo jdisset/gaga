@@ -226,6 +226,8 @@ namespace GAGA
         double mutationProba        = 0.5;        // mutation probablility
         SelectionMethod selecMethod = SelectionMethod::randomObjTournament;
         bool evaluateAllIndividuals = false;
+        bool doSaveParetoFront      = true;
+        
         /********************************************************************************
          *                                 SETTERS
          ********************************************************************************/
@@ -271,7 +273,6 @@ namespace GAGA
             switch (sm)
             {
                 case SelectionMethod::paretoTournament:
-                case SelectionMethod::paretoDistanceTournament:
                     selection = [this]()
                         {
                             return paretoTournament();
@@ -290,6 +291,10 @@ namespace GAGA
         void setEvaluateAllIndividuals(bool m)
         {
             evaluateAllIndividuals = m;
+        }
+        void setSaveParetoFront(bool m)
+        {
+            doSaveParetoFront = m;
         }
 
         vector<Individual<DNA>> population;
@@ -417,7 +422,14 @@ namespace GAGA
                         if (novelty && saveArchiveEnabled) saveArchive();
                     }
                     if (verbosity >= 1) printGenStats(currentGeneration);
-                    saveBests(nbSavedElites);
+                    if (doSaveParetoFront)
+                    {
+                        saveParetoFront();
+                    }
+                    else
+                    {
+                        saveBests(nbSavedElites);
+                    }
                     saveStats();
                     prepareNextPop();
                     auto tnp1 = high_resolution_clock::now();
@@ -637,30 +649,27 @@ namespace GAGA
 
             unordered_map<string, vector<Individual<DNA>>> elites;
 
-            if (selecMethod != SelectionMethod::paretoDistanceTournament)
+            for (auto& o : obj)
             {
-                for (auto& o : obj)
+                elites[o] = vector<Individual<DNA>>();
+                elites[o].push_back(last_gen[0]);
+                
+                size_t worst = 0;
+                for (size_t i = 1; i < n && i < last_gen.size(); ++i)
                 {
-                    elites[o] = vector<Individual<DNA>>();
-                    elites[o].push_back(last_gen[0]);
-
-                    size_t worst = 0;
-                    for (size_t i = 1; i < n && i < last_gen.size(); ++i)
+                    elites[o].push_back(last_gen[i]);
+                    if (isBetter(elites[o][worst].fitnesses.at(o), last_gen[i].fitnesses.at(o))) worst = i;
+                }
+                for (size_t i = n; i < population.size(); ++i)
+                {
+                    if (isBetter(last_gen[i].fitnesses.at(o), elites[o][worst].fitnesses.at(o)))
                     {
-                        elites[o].push_back(last_gen[i]);
-                        if (isBetter(elites[o][worst].fitnesses.at(o), last_gen[i].fitnesses.at(o))) worst = i;
-                    }
-                    for (size_t i = n; i < population.size(); ++i)
-                    {
-                        if (isBetter(last_gen[i].fitnesses.at(o), elites[o][worst].fitnesses.at(o)))
-                        {
-                            elites[o][worst] = last_gen[i];
-                            for (size_t j = 0; j < n; ++j)
-                                if (isBetter(elites[o][worst].fitnesses.at(o), elites[o][j].fitnesses.at(o))) worst = j;
-                        }
+                        elites[o][worst] = last_gen[i];
+                        for (size_t j = 0; j < n; ++j)
+                            if (isBetter(elites[o][worst].fitnesses.at(o), elites[o][j].fitnesses.at(o))) worst = j;
                     }
                 }
-            }
+            }            
 
             return elites;
         }
@@ -1068,6 +1077,50 @@ namespace GAGA
                     fs << i.dna.serialize();
                     fs.close();
                 }
+            }
+        }
+
+        
+        void saveParetoFront()
+        {
+            //std::vector<Individual<DNA> *> participants;
+            //for (size_t i = 0; i < tournamentSize; ++i)
+            //    participants.push_back(&population[dint(globalRand)]);
+            //auto pf = getParetoFront(participants);
+
+            std::vector<Individual<DNA>*> pop;
+            for (size_t i = 0; i < population.size(); ++i)
+            {
+                pop.push_back(&population[i]);
+            }
+            
+            auto front = getParetoFront(pop);
+            std::stringstream baseName;
+            baseName << folder << "/gen" << currentGeneration;
+            mkdir(baseName.str().c_str(), 0777);
+            if (verbosity >= 3)
+            {
+                std::cerr << "created directory " << baseName.str() << std::endl;
+            }
+
+            int id = 0;
+            for (const auto& ind : front)
+            {
+                std::stringstream filename;
+                filename << baseName.str() << "/";
+                for (const auto& f : ind->fitnesses)
+                {
+                    filename << f.first << f.second << "_";
+                }
+                filename << id++ << ".dna";
+
+                std::ofstream fs(filename.str());
+                if (!fs)
+                {
+                    std::cerr << "Cannot open the output file.\n";
+                }
+                fs << ind->dna.serialize();
+                fs.close();
             }
         }
 
