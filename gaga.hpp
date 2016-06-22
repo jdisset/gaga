@@ -191,7 +191,7 @@ template <typename DNA> class GA {
 	size_t tournamentSize = 3;        // nb of competitors in tournament
 	double minNoveltyForArchive = 1;  // min novelty for being added to the general archive
 	size_t KNN = 15;                  // size of the neighbourhood for novelty
-	bool savePopEnabled = true;       // save the whole population?
+	bool savePopEnabled = true;       // save the whole pif (saveGenStats) opulation?
 	bool saveArchiveEnabled = true;   // save the novelty archive?
 	unsigned int saveInterval = 1;    // interval between 2 whole population saves
 	string folder = "../evos/";       // where to save the results
@@ -201,7 +201,8 @@ template <typename DNA> class GA {
 	SelectionMethod selecMethod = SelectionMethod::randomObjTournament;
 	bool evaluateAllIndividuals = false;
 	bool doSaveParetoFront = false;
-	bool saveFullStats = false;
+	bool doSaveGenStats = false;
+	bool doSaveIndStats = false;
 
 	/********************************************************************************
 	 *                                 SETTERS
@@ -253,7 +254,8 @@ template <typename DNA> class GA {
 
 	void setEvaluateAllIndividuals(bool m) { evaluateAllIndividuals = m; }
 	void setSaveParetoFront(bool m) { doSaveParetoFront = m; }
-	void setSaveFullStats(bool m) { saveFullStats = m; }
+	void setSaveGenStats(bool m) { doSaveGenStats = m; }
+	void setSaveIndStats(bool m) { doSaveIndStats = m; }
 	vector<Individual<DNA>> population;
 	vector<Individual<DNA>> lastGen;
 
@@ -378,11 +380,8 @@ template <typename DNA> class GA {
 				} else {
 					saveBests(nbSavedElites);
 				}
-				saveStats();
-
-				if (saveFullStats) {
-					saveStatsFull();
-				}
+				if (doSaveGenStats) saveGenStats();
+				if (doSaveIndStats) saveIndStats();
 
 				prepareNextPop();
 				auto tnp1 = high_resolution_clock::now();
@@ -1017,24 +1016,24 @@ template <typename DNA> class GA {
 		}
 	}
 
-	void saveStats() {
+	void saveGenStats() {
 		std::stringstream csv;
 		std::stringstream fileName;
-		fileName << folder << "/stats.csv";
+		fileName << folder << "/gen_stats.csv";
 		csv << "generation";
 		if (genStats.size() > 0) {
-			for (auto &cat : genStats[0]) {
+			for (const auto &cat : genStats[0]) {
 				std::stringstream column;
 				column << cat.first << "_";
-				for (auto &s : cat.second) {
+				for (const auto &s : cat.second) {
 					csv << "," << column.str() << s.first;
 				}
 			}
 			csv << endl;
 			for (size_t i = 0; i < genStats.size(); ++i) {
 				csv << i;
-				for (auto &cat : genStats[i]) {
-					for (auto &s : cat.second) {
+				for (const auto &cat : genStats[i]) {
+					for (const auto &s : cat.second) {
 						csv << "," << s.second;
 					}
 				}
@@ -1050,10 +1049,10 @@ template <typename DNA> class GA {
 	}
 
 	// gen,id0,fit0,fit1,...,time,is_on_pareto_front,id1,...
-	void saveStatsFull() {
+	void saveIndStats() {
 		std::stringstream csv;
 		std::stringstream fileName;
-		fileName << folder << "/stats_full.csv";
+		fileName << folder << "/ind_stats.csv";
 
 		static bool has_been_written = false;
 
