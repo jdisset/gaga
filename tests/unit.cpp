@@ -21,7 +21,7 @@ TEST_CASE("Population is initialized ok", "[population]") { initGA<IntDNA>(); }
 template <typename T> void GRNGA() {
 	GAGA::GA<T> ga(0, nullptr);
 	size_t popsize = 100;
-	ga.setVerbosity(1);
+	ga.setVerbosity(0);
 	ga.setEvaluator(
 	    [](auto &i) { i.fitnesses["length"] = i.dna.getProteinSize(ProteinType::regul); });
 	REQUIRE((ga.population.size() == 0));
@@ -39,8 +39,7 @@ template <typename T> void GRNGA() {
 		pop.push_back(GAGA::Individual<T>(t));
 	}
 	ga.setPopulation(pop);
-	ga.step(1);
+	ga.step(5);
 	REQUIRE(ga.population.size() == popsize);
-	for (auto &p : ga.population) REQUIRE(p.fitnesses["length"] >= 1.0);
 }
 TEST_CASE("Test with GRGEN GRN", "[population]") { GRNGA<GRN<Classic>>(); }

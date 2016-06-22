@@ -25,7 +25,7 @@ struct IntDNA {
 	// A reset method (just to cleanup things before a new evaluation)
 	void reset() {}
 	// And a method that returns a json string
-	std::string toJSON() const {
+	std::string serialize() const {
 		nlohmann::json o;
 		o["value"] = value;
 		return o.dump(2);
