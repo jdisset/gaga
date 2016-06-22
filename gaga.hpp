@@ -1045,8 +1045,32 @@ template <typename DNA> class GA {
 		fs.close();
 	}
 
-	// gen,id0,fit0,fit1,...,time,is_on_pareto_front,id1,...
+	// gen, idInd, fit0, fit1, time
 	void saveIndStats() {
+		std::stringstream csv;
+		std::stringstream fileName;
+		fileName << folder << "/ind_stats.csv";
+		static bool indStatsWritten = false;
+		if (!indStatsWritten) {
+			csv << "generation,idInd,";
+			for (auto &o : population[0].fitnesses) csv << o.first << ",";
+			csv << "time" << std::endl;
+			indStatsWritten = true;
+		}
+		for (size_t i = 0; i < population.size(); ++i) {
+			const auto &p = population[i];
+			csv << currentGeneration << "," << i << ",";
+			for (auto &o : p.fitnesses) csv << o.second << ",";
+			csv << p.evalTime << std::endl;
+		}
+		std::ofstream fs;
+		fs.open(fileName.str(), std::fstream::out | std::fstream::app);
+		if (!fs) cerr << "Cannot open the output file." << endl;
+		fs << csv.str();
+		fs.close();
+	}
+
+	void saveIndStats_OneLinePerGen() {
 		std::stringstream csv;
 		std::stringstream fileName;
 		fileName << folder << "/ind_stats.csv";
