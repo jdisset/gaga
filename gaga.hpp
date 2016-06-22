@@ -1144,9 +1144,25 @@ template <typename DNA> class GA {
 		fs.close();
 	}
 
+	int mkpath(const char *file_path, mode_t mode) {
+		assert(file_path && *file_path);
+		char *p;
+		for (p = strchr(file_path + 1, '/'); p; p = strchr(p + 1, '/')) {
+			*p = '\0';
+			if (mkdir(file_path, mode) == -1) {
+				if (errno != EEXIST) {
+					*p = '/';
+					return -1;
+				}
+			}
+			*p = '/';
+		}
+		return 0;
+	}
 	void createFolder(string baseFolder) {
+		if (baseFolder.back() != '/') baseFolder += "/";
 		struct stat sb;
-		mkdir(baseFolder.c_str(), 0777);
+		mkpath(baseFolder.c_str(), 0777);
 		auto now = system_clock::now();
 		time_t now_c = system_clock::to_time_t(now);
 		struct tm *parts = localtime(&now_c);
@@ -1162,7 +1178,7 @@ template <typename DNA> class GA {
 			cpt++;
 		} while (stat(ftot.str().c_str(), &sb) == 0 && S_ISDIR(sb.st_mode));
 		folder = ftot.str();
-		mkdir(folder.c_str(), 0777);
+		mkpath(folder.c_str(), 0777);
 	}
 
  public:
