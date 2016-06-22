@@ -23,6 +23,7 @@
 // before including this file,
 // #define OMP if you want OpenMP parallelisation
 // #define CLUSTER if you want MPI parralelisation
+// #define CLUSTER if you want MPI parralelisation
 #ifdef CLUSTER
 #include <mpi.h>
 #include <cstring>
@@ -42,6 +43,7 @@
 #include <random>
 #include <sstream>
 #include <string>
+#include <cstring>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
