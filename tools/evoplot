@@ -1,0 +1,102 @@
+#! /usr/bin/env python3
+
+# ------------------------------   evoplot ------------------------------------
+# Plots the (optionnaly smoothed out) average evolution across generations
+# of one or several columns extracted from multiple gen_stats.csv files.
+# File list is automatically extracted during a recursive search in the given
+# directories.
+# ------------------------------------------------------------------------------
+# usage: evoplot [-h] -c COLUMNS [COLUMNS ...] -d DIRECTORIES [DIRECTORIES ...]
+               # [-s SMOOTH]
+# optional arguments:
+  # -h, --help            show help message and exit
+  # -c COLUMNS [COLUMNS ...], --columns COLUMNS [COLUMNS ...]
+  # -d DIRECTORIES [DIRECTORIES ...], --directories DIRECTORIES [DIRECTORIES ...]
+  # -s SMOOTH, --smooth SMOOTH
+
+from colorama import Fore, Back, Style
+import argparse
+import matplotlib.pyplot as plt
+import matplotlib.ticker as plticker
+from matplotlib.legend_handler import HandlerLine2D
+import numpy as np
+import pandas as pd
+import scipy as sp
+import math
+import scipy.stats
+import glob2
+import sys
+
+
+
+# available colors
+colors = ('#0B8496','#B01212','#099625','#710BBF','#0B92BF','#EDA200','#4C5B8F','#4C8F6C')
+
+# low pass smooth filter
+def smooth(x,window_len=15,window='hanning'):
+    if x.ndim != 1:
+        raise (ValueError, "smooth only accepts 1 dimension arrays.")
+    if x.size < window_len:
+        raise (ValueError, "Input vector needs to be bigger than window size.")
+    if window_len<3:
+        return x
+    if not window in ['flat', 'hanning', 'hamming', 'bartlett', 'blackman']:
+        raise (ValueError, "Window is on of 'flat', 'hanning', 'hamming', 'bartlett', 'blackman'")
+    s=np.r_[2*x[0]-x[window_len-1::-1],x,2*x[-1]-x[-1:-window_len:-1]]
+    if window == 'flat':
+        w=np.ones(window_len,'d')
+    else:
+        w=eval('np.'+window+'(window_len)')
+        y=np.convolve(w/w.sum(),s,mode='same')
+    return y[window_len:-window_len+1]
+
+
+# parsing args
+parser = argparse.ArgumentParser()
+parser.add_argument('-c', '--columns', nargs='+', required=True)
+parser.add_argument('-d', '--directories', nargs='+', required=True)
+parser.add_argument('-s', '--smooth', type=int, default=0)
+args = parser.parse_args()
+folders = args.directories
+columns = args.columns
+
+print("Looking for csv files... ", end='')
+sys.stdout.flush()
+allcsv = [glob2.glob(name + '/**/*.csv') for name in folders]
+numcsv = sum(len(c) for c in allcsv)
+print(Fore.GREEN, numcsv, Style.RESET_ALL, "found. Generating plots.")
+
+# reading csv data
+data = [[np.genfromtxt(f, dtype=float, delimiter=',', names=True) for f in n] for n in allcsv]
+
+fitbest = [np.absolute(np.array([np.resize(i[columns[0]],150) for i in d])).T for d in data]
+avg = [fb.mean(axis=1) for fb in fitbest]
+prettyavg = [smooth(a,window_len=args.smooth,window='blackman') for a in avg]
+std = [fb.std(axis=1) for fb in fitbest]
+t_bounds = [scipy.stats.t.interval(0.99, len(fb) - 1) for fb in fitbest]
+conf = [[avg[i] + critval * std[i] / math.sqrt(len(fitbest[i])) for critval in t_bounds[i]] for i in range(len(fitbest))]
+
+
+w, h = plt.figaspect(0.6)
+fig, ax = plt.subplots(figsize=(w,h), facecolor='white')
+ax.spines["top"].set_visible(False)
+ax.spines["left"].set_color('#dddddd')
+ax.spines["right"].set_color('#dddddd')
+ax.spines["bottom"].set_color('#dddddd')
+ax.set_axis_bgcolor('white')
+plt.ylabel("Best Fitness", fontsize=16)
+plt.xlabel("Generation", fontsize=16)
+
+ax.tick_params(axis="both", which="both", bottom="off", top="off",
+        labelbottom="on", left="off", right="off", labelleft="on", labelright="on")
+loc = plticker.MultipleLocator(base=25.0) # this locator puts ticks at regular intervals
+ax.yaxis.set_major_locator(loc)
+for i in range(len(fitbest)):
+    x = np.arange(len(avg[i]))
+    ax.fill_between(x, conf[i][0],conf[i][1],color=colors[i],alpha=0.15)
+    line, = ax.plot(prettyavg[i], color=colors[i], label=folders[i], alpha=1.0)
+    plt.legend(handler_map={line: HandlerLine2D()})
+ax.grid()
+plt.ylim(0.0,plt.ylim()[1])
+# plt.show()
+plt.savefig("plot.svg", bbox_inches="tight")
