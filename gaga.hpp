@@ -202,7 +202,7 @@ template <typename DNA> class GA {
 	double mutationProba = 0.5;        // mutation probablility
 	bool evaluateAllIndividuals = false;  // force evaluation of every individual
 	bool doSaveParetoFront = false;       // save the pareto front
-	bool doSaveGenStats = false;          // save generations stats to csv file
+	bool doSaveGenStats = true;           // save generations stats to csv file
 	bool doSaveIndStats = false;          // save individuals stats to csv file
 	SelectionMethod selecMethod = SelectionMethod::paretoTournament;
 
@@ -1040,9 +1040,7 @@ template <typename DNA> class GA {
 			}
 		}
 		std::ofstream fs(fileName.str());
-		if (!fs) {
-			cerr << "Cannot open the output file." << endl;
-		}
+		if (!fs) cerr << "Cannot open the output file." << endl;
 		fs << csv.str();
 		fs.close();
 	}
