@@ -1145,7 +1145,7 @@ template <typename DNA> class GA {
 		fs.close();
 	}
 
-	int mkpath(const char *file_path, mode_t mode) {
+	int mkpath(char *file_path, mode_t mode) {
 		assert(file_path && *file_path);
 		char *p;
 		for (p = strchr(file_path + 1, '/'); p; p = strchr(p + 1, '/')) {
