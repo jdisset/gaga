@@ -44,6 +44,7 @@
 #include <random>
 #include <sstream>
 #include <string>
+#include <cstring>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -343,7 +344,7 @@ template <typename DNA> class GA {
 			MPI_distributePopulation();
 #endif
 #ifdef OMP
-#pragma omp parallel for schedule(dynamic, 2)
+#pragma omp parallel for schedule(dynamic, 1)
 #endif
 			for (size_t i = 0; i < population.size(); ++i) {
 				if (evaluateAllIndividuals || !population[i].evaluated) {
@@ -1162,7 +1163,9 @@ template <typename DNA> class GA {
 	void createFolder(string baseFolder) {
 		if (baseFolder.back() != '/') baseFolder += "/";
 		struct stat sb;
-		mkpath(baseFolder.c_str(), 0777);
+		char bFChar[baseFolder.length() + 1];
+		strcpy(bFChar, baseFolder.c_str());
+		mkpath(bFChar, 0777);
 		auto now = system_clock::now();
 		time_t now_c = system_clock::to_time_t(now);
 		struct tm *parts = localtime(&now_c);
