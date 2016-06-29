@@ -388,8 +388,6 @@ template <typename DNA> class GA {
 				}
 				if (doSaveGenStats) saveGenStats();
 				if (doSaveIndStats) saveIndStats();
-
-				saveStats();
 				prepareNextPop();
 				auto tnp1 = high_resolution_clock::now();
 				double tnp = std::chrono::duration<double>(tnp1 - tnp0).count();
