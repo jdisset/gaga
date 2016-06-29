@@ -38,13 +38,13 @@
 #include <algorithm>
 #include <chrono>
 #include <cstring>
+#include <cstring>
 #include <deque>
 #include <fstream>
 #include <map>
 #include <random>
 #include <sstream>
 #include <string>
-#include <cstring>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -378,21 +378,18 @@ template <typename DNA> class GA {
 					if (novelty && saveArchiveEnabled) saveArchive();
 				}
 				if (verbosity >= 1) printGenStats(currentGeneration);
-<<<<<<< 1d0c3612a3bd1c2c438e30c1e8b83fe7e1558844
 				if (currentGeneration % saveGenInterval == 0) {
 					if (doSaveParetoFront) {
 						saveParetoFront();
 					} else {
 						saveBests(nbSavedElites);
+						if (nbSavedElites > 0) saveBests(nbSavedElites);
 					}
 				}
 				if (doSaveGenStats) saveGenStats();
 				if (doSaveIndStats) saveIndStats();
 
-=======
-				if (nbSavedElites > 0) saveBests(nbSavedElites);
 				saveStats();
->>>>>>> stop creating useless empty folders
 				prepareNextPop();
 				auto tnp1 = high_resolution_clock::now();
 				double tnp = std::chrono::duration<double>(tnp1 - tnp0).count();
