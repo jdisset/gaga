@@ -18,6 +18,64 @@ template <typename T> void initGA() {
 }
 TEST_CASE("Population is initialized ok", "[population]") { initGA<IntDNA>(); }
 
+void helpersMethods() {
+	const int N = 50;
+	GAGA::GA<IntDNA> ga(0, nullptr);
+	ga.setVerbosity(0);
+	ga.setEvaluator([](auto &i) {
+		i.fitnesses["value"] = i.dna.value;
+		i.fitnesses["other"] = N - i.dna.value;
+	});
+	int i = 0;
+	ga.setPopSize(N);
+	ga.setMutationProba(0);
+	ga.setCrossoverProba(0);
+	ga.initPopulation([&]() {
+		IntDNA d;
+		d.value = i++;
+		return d;
+	});
+	REQUIRE(i == N);
+	REQUIRE(ga.population[0].dna.value == 0);
+	REQUIRE(ga.population[49].dna.value == N - 1);
+	ga.evaluate();
+
+	// ELITISM
+	// -> from main population
+	auto elites = ga.getElites(1);
+	REQUIRE(elites.size() == 2);
+	REQUIRE(elites.count("value"));
+	REQUIRE(elites.count("other"));
+	REQUIRE(elites["value"].size() == 1);
+	REQUIRE(elites["other"].size() == 1);
+	REQUIRE(elites["value"][0].dna.value == N - 1);
+	REQUIRE(elites["other"][0].dna.value == 0);
+	elites = ga.getElites(2);
+	REQUIRE(elites.size() == 2);
+	REQUIRE(elites.count("value"));
+	REQUIRE(elites.count("other"));
+	REQUIRE(elites["value"].size() == 2);
+	REQUIRE(elites["other"].size() == 2);
+	REQUIRE(elites["value"][0].dna.value != elites["value"][1].dna.value);
+	REQUIRE(elites["value"][0].dna.value + elites["value"][1].dna.value == 2 * N - 3);
+	REQUIRE(elites["other"][0].dna.value != elites["other"][1].dna.value);
+	REQUIRE(elites["other"][0].dna.value * elites["other"][1].dna.value == 0);
+	REQUIRE(elites["other"][0].dna.value + elites["other"][1].dna.value == 1);
+	// -> from sub population pointers
+	std::vector<GAGA::Individual<IntDNA> *> subPop;
+	for (size_t c = 0; c < 10; ++c) subPop.push_back(&ga.population[c]);
+	elites = ga.getElites(1, subPop);
+	REQUIRE(elites.size() == 2);
+	REQUIRE(elites.count("value"));
+	REQUIRE(elites.count("other"));
+	REQUIRE(elites["value"].size() == 1);
+	REQUIRE(elites["other"].size() == 1);
+	REQUIRE(elites["value"][0].dna.value == 9);
+	REQUIRE(elites["other"][0].dna.value == 0);
+}
+
+TEST_CASE("Helpers methods ok", "[methods]") { helpersMethods(); }
+
 template <typename T> void GRNGA() {
 	GAGA::GA<T> ga(0, nullptr);
 	size_t popsize = 100;

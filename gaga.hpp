@@ -38,13 +38,13 @@
 #include <algorithm>
 #include <chrono>
 #include <cstring>
+#include <cstring>
 #include <deque>
 #include <fstream>
 #include <map>
 #include <random>
 #include <sstream>
 #include <string>
-#include <cstring>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -237,7 +237,12 @@ template <typename DNA> class GA {
 	                  std::string ename = "anonymousEvaluator") {
 		evaluator = e;
 		evaluatorName = ename;
+		for (auto &i : population) {
+			i.evaluated = false;
+			i.wasAlreadyEvaluated = false;
+		}
 	}
+
 	void setNewGenerationFunction(std::function<void(void)> f) {
 		newGenerationFunction = f;
 	}
@@ -286,6 +291,10 @@ template <typename DNA> class GA {
 	std::function<void(void)> newGenerationFunction = []() {};
 	std::function<bool(double, double)> isBetter = [](double a, double b) { return a > b; };
 
+	// returns a reference (transforms pointer into reference)
+	template <typename T> inline T &ref(T &obj) { return obj; }
+	template <typename T> inline T &ref(T *obj) { return *obj; }
+
  public:
 	/*********************************************************************************
 	 *                              CONSTRUCTOR
@@ -322,11 +331,34 @@ template <typename DNA> class GA {
 
 	void initPopulation(const std::function<DNA()> &f) {
 		if (procId == 0) {
+			population.clear();
 			population.reserve(popSize);
 			for (size_t i = 0; i < popSize; ++i) {
 				population.push_back(Individual<DNA>(f()));
 				population[population.size() - 1].evaluated = false;
 			}
+		}
+	}
+
+	void evaluate() {
+#ifdef OMP
+#pragma omp parallel for schedule(dynamic, 1)
+#endif
+		for (size_t i = 0; i < population.size(); ++i) {
+			if (evaluateAllIndividuals || !population[i].evaluated) {
+				auto t0 = high_resolution_clock::now();
+				population[i].dna.reset();
+				evaluator(population[i]);
+				auto t1 = high_resolution_clock::now();
+				population[i].evaluated = true;
+				double indTime = std::chrono::duration<double>(t1 - t0).count();
+				population[i].evalTime = indTime;
+				population[i].wasAlreadyEvaluated = false;
+			} else {
+				population[i].evalTime = 0.0;
+				population[i].wasAlreadyEvaluated = true;
+			}
+			if (verbosity >= 2) printIndividualStats(population[i]);
 		}
 	}
 
@@ -343,25 +375,7 @@ template <typename DNA> class GA {
 #ifdef CLUSTER
 			MPI_distributePopulation();
 #endif
-#ifdef OMP
-#pragma omp parallel for schedule(dynamic, 1)
-#endif
-			for (size_t i = 0; i < population.size(); ++i) {
-				if (evaluateAllIndividuals || !population[i].evaluated) {
-					auto t0 = high_resolution_clock::now();
-					population[i].dna.reset();
-					evaluator(population[i]);
-					auto t1 = high_resolution_clock::now();
-					population[i].evaluated = true;
-					double indTime = std::chrono::duration<double>(t1 - t0).count();
-					population[i].evalTime = indTime;
-					population[i].wasAlreadyEvaluated = false;
-				} else {
-					population[i].evalTime = 0.0;
-					population[i].wasAlreadyEvaluated = true;
-				}
-				if (verbosity >= 2) printIndividualStats(population[i]);
-			}
+			evaluate();
 #ifdef CLUSTER
 			MPI_receivePopulation();
 #endif
@@ -524,6 +538,20 @@ template <typename DNA> class GA {
 		if (verbosity >= 3) cerr << "done completely" << endl;
 	}
 
+	template <typename I>  // I is ither Individual<DNA> or Individual<DNA>*
+	vector<Individual<DNA>> produceNOffsprings(size_t n, const vector<I> &popu) {
+		if (verbosity >= 3)
+			cerr << "Going to produce " << n << " offsprings out of " << popu.size()
+			     << " individuals" << endl;
+		std::uniform_real_distribution<double> d(0.0, 1.0);
+		vector<Individual<DNA>> nextGen;
+		nextGen.reserve(n);
+
+		auto elites = getElites(nbElites, popu);
+		for (auto &e : elites)
+			for (auto &i : e.second) nextGen.push_back(i);
+	}
+
 	bool paretoDominates(const Individual<DNA> &a, const Individual<DNA> &b) const {
 		for (auto &o : a.fitnesses)
 			if (!isBetter(o.second, b.fitnesses.at(o.first))) return false;
@@ -594,34 +622,47 @@ template <typename DNA> class GA {
 		return champion;
 	}
 
+	// getELites methods : returns a vector of N best individuals in the specified
+	// subPopulations, for the specified fitnesses.
+	// elites indivuduals are not ordered.
 	unordered_map<string, vector<Individual<DNA>>> getElites(size_t n) {
 		vector<string> obj;
 		for (auto &o : population[0].fitnesses) obj.push_back(o.first);
 		return getElites(obj, n, population);
+	}
+
+	template <typename I>
+	unordered_map<string, vector<Individual<DNA>>> getElites(size_t n,
+	                                                         const vector<I> &popVec) {
+		vector<string> obj;
+		for (auto &o : ref(popVec[0]).fitnesses) obj.push_back(o.first);
+		return getElites(obj, n, popVec);
 	}
 	unordered_map<string, vector<Individual<DNA>>> getLastGenElites(size_t n) {
 		vector<string> obj;
 		for (auto &o : population[0].fitnesses) obj.push_back(o.first);
 		return getElites(obj, n, lastGen);
 	}
-	unordered_map<string, vector<Individual<DNA>>> getElites(
-	    const vector<string> &obj, size_t n, const vector<Individual<DNA>> &popVec) {
+	template <typename I>
+	unordered_map<string, vector<Individual<DNA>>> getElites(const vector<string> &obj,
+	                                                         size_t n,
+	                                                         const vector<I> &popVec) {
 		if (verbosity >= 3) {
 			cerr << "getElites : nbObj = " << obj.size() << " n = " << n << endl;
 		}
 		unordered_map<string, vector<Individual<DNA>>> elites;
 		for (auto &o : obj) {
 			elites[o] = vector<Individual<DNA>>();
-			elites[o].push_back(popVec[0]);
+			elites[o].push_back(ref(popVec[0]));
 			size_t worst = 0;
 			for (size_t i = 1; i < n && i < popVec.size(); ++i) {
-				elites[o].push_back(popVec[i]);
-				if (isBetter(elites[o][worst].fitnesses.at(o), popVec[i].fitnesses.at(o)))
+				elites[o].push_back(ref(popVec[i]));
+				if (isBetter(elites[o][worst].fitnesses.at(o), ref(popVec[i]).fitnesses.at(o)))
 					worst = i;
 			}
 			for (size_t i = n; i < popVec.size(); ++i) {
-				if (isBetter(popVec[i].fitnesses.at(o), elites[o][worst].fitnesses.at(o))) {
-					elites[o][worst] = popVec[i];
+				if (isBetter(ref(popVec[i]).fitnesses.at(o), elites[o][worst].fitnesses.at(o))) {
+					elites[o][worst] = ref(popVec[i]);
 					for (size_t j = 0; j < n; ++j) {
 						if (isBetter(elites[o][worst].fitnesses.at(o), elites[o][j].fitnesses.at(o)))
 							worst = j;
@@ -631,6 +672,37 @@ template <typename DNA> class GA {
 		}
 		return elites;
 	}
+
+	// SPECIATION
+	// Pour la pop initiale : un individu random dupliqué par mutation, 2 fois la taille min
+	// de l'espece.
+	//
+	// on a des espèces (plusieurs pops)
+	// 1 adn représentant par espece choisi aléatoirement dans l'espece de génération
+	// précédente
+	// chaque adn de la pop est classé dans une espèce en fonction de sa distance au
+	// représentant
+	// de l'espèce.
+	// - Affectation de l'individu à l'espèce la plus proche (et en dessous d'un pallier)
+	// - Si aucune espèce en dessous du pallier, création d'une nouvelle espèce dont
+	// l'individu devient représentant
+	// Toutes les espèces qui ont une taille inférieure à un certain pallier (ex. 15) sont
+	// supprimées
+	// (y compris les individus les composants).
+	// Il faut ensuite regénérer des individus (par sélection classique dans une espèce
+	// aléatoire, avec mutation). Chaque nouvel individu est inséré dans l'espèce en cours
+	// si sa distance est inférieure au palier. On en regénère un autre sinon.
+	// jusqu'à ce que la pop ait la taille désirée.
+	// Les sélections/mutations/crossover entre chaque génération ne se font qu'au sein
+	// d'une même espèce.
+	// Pour chaque espèce, on autorise un certain nombre de descendants : pour chaque
+	// individu de chaque espèce, on calcule la fitness ajustée qui est sa fitness divisée
+	// par la taille de l'espèce.
+	// Pour une espèce : NbOffspring = PopSize * Sum(fitnessAjustees) /
+	// Sum(Sum(fitnessAjustees))
+	// Taux spécialisation par espèce =
+	//   si taille espece < taille moyenne especes  ->  min(speciationThreshold+0.01,0.5)
+	//   si taille espece >= taille moyenne especes  ->  max(speciationThreshold-0.01,0.03)
 
  protected:
 	/*********************************************************************************
