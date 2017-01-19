@@ -289,6 +289,7 @@ template <typename DNA> class GA {
 	std::function<void(Individual<DNA> &)> evaluator;
 	std::function<Individual<DNA> *()> selection;
 	std::function<void(void)> newGenerationFunction = []() {};
+	std::function<void(void)> nextGeneration = [this]() { classicNextGen(); };
 	std::function<bool(double, double)> isBetter = [](double a, double b) { return a > b; };
 
 	// returns a reference (transforms pointer into reference)
@@ -402,7 +403,8 @@ template <typename DNA> class GA {
 				if (doSaveGenStats) saveGenStats();
 				if (doSaveIndStats) saveIndStats();
 
-				prepareNextPop();
+				nextGeneration();
+
 				auto tnp1 = high_resolution_clock::now();
 				double tnp = std::chrono::duration<double>(tnp1 - tnp0).count();
 				if (verbosity >= 2) {
@@ -491,24 +493,30 @@ template <typename DNA> class GA {
 	/*********************************************************************************
 	 *                            NEXT POP GETTING READY
 	 ********************************************************************************/
-	// Là où qu'on fait les bébés.
-	void prepareNextPop() {
-		assert(tournamentSize > 0);
-		assert(population.size() == popSize);
-		vector<Individual<DNA>> nextGen;
-		nextGen.reserve(popSize);
-		std::uniform_real_distribution<double> d(0.0, 1.0);
-
-		// Save this generation
+	void classicNextGen() {
+		auto nextGen = produceNOffsprings(popSize, population, nbElites);
 		lastGen = population;
+		population = nextGen;
+		if (verbosity >= 3) cerr << "Next generation ready" << endl;
+	}
 
-		// elitism
-		auto elites = getElites(nbElites);
-		for (auto &e : elites)
-			for (auto &i : e.second) nextGen.push_back(i);
+	void speciationNextGen() {}
 
-		if (verbosity >= 3) cerr << "preparing rest of the population" << endl;
-		while (nextGen.size() < popSize) {
+	template <typename I>  // I is ither Individual<DNA> or Individual<DNA>*
+	vector<Individual<DNA>> produceNOffsprings(size_t n, const vector<I> &popu,
+	                                           size_t nElites = 0) {
+		if (verbosity >= 3)
+			cerr << "Going to produce " << n << " offsprings out of " << popu.size()
+			     << " individuals" << endl;
+		std::uniform_real_distribution<double> d(0.0, 1.0);
+		vector<Individual<DNA>> nextGen;
+		nextGen.reserve(n);
+		if (nElites > 0) {
+			auto elites = getElites(nElites, popu);
+			for (auto &e : elites)
+				for (auto &i : e.second) nextGen.push_back(i);
+		}
+		while (nextGen.size() < n) {
 			// selection + crossover
 			Individual<DNA> *p0 = selection();
 			Individual<DNA> offspring;
@@ -532,24 +540,8 @@ template <typename DNA> class GA {
 			nextGen.push_back(offspring);
 		}
 		if (verbosity >= 3) cerr << "done" << endl;
-		assert(nextGen.size() == popSize);
-		population.clear();
-		population = nextGen;
-		if (verbosity >= 3) cerr << "done completely" << endl;
-	}
-
-	template <typename I>  // I is ither Individual<DNA> or Individual<DNA>*
-	vector<Individual<DNA>> produceNOffsprings(size_t n, const vector<I> &popu) {
-		if (verbosity >= 3)
-			cerr << "Going to produce " << n << " offsprings out of " << popu.size()
-			     << " individuals" << endl;
-		std::uniform_real_distribution<double> d(0.0, 1.0);
-		vector<Individual<DNA>> nextGen;
-		nextGen.reserve(n);
-
-		auto elites = getElites(nbElites, popu);
-		for (auto &e : elites)
-			for (auto &i : e.second) nextGen.push_back(i);
+		assert(nextGen.size() == n);
+		return nextGen;
 	}
 
 	bool paretoDominates(const Individual<DNA> &a, const Individual<DNA> &b) const {

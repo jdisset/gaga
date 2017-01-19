@@ -8,15 +8,28 @@
 template <typename T> void initGA() {
 	GAGA::GA<T> ga(0, nullptr);
 	ga.setVerbosity(0);
+	ga.setMutationProba(0.7);
+	ga.setCrossoverProba(0.3);
 	ga.setEvaluator([](auto &i) { i.fitnesses["value"] = i.dna.value; });
 	REQUIRE((ga.population.size() == 0));
-	ga.setPopSize(400);
+	ga.setPopSize(200);
 	ga.initPopulation([]() { return T::random(); });
-	REQUIRE(ga.population.size() == 400);
-	ga.step(10);
-	REQUIRE(ga.population.size() == 400);
+	ga.step(1);
+	int initialBest = 0;
+	for (const auto &i : ga.population)
+		if (initialBest < i.dna.value) initialBest = i.dna.value;
+	REQUIRE(ga.population.size() == 200);
+	ga.step(50);
+	int newBest = 0;
+	for (const auto &i : ga.population)
+		if (newBest < i.dna.value) newBest = i.dna.value;
+	REQUIRE(ga.population.size() == 200);
+	REQUIRE(newBest > initialBest);
 }
-TEST_CASE("Population is initialized ok", "[population]") { initGA<IntDNA>(); }
+
+TEST_CASE("Population is initialized ok, individuals are improving", "[population]") {
+	initGA<IntDNA>();
+}
 
 void helpersMethods() {
 	const int N = 50;
