@@ -561,7 +561,7 @@ template <typename DNA> class GA {
 
 		if (species.size() == 0) {
 			if (verbosity >= 3) cerr << "No specie available, creating one" << std::endl;
-			// we put all the population in one specie
+			// we put all the population in one species
 			species.resize(1);
 			for (auto &i : population) species[0].push_back(&i);
 			speciationThresholds.clear();
@@ -574,15 +574,12 @@ template <typename DNA> class GA {
 		vector<Individual<DNA>> nextLeaders;
 		// New species leaders
 		for (auto &s : species) {
+			assert(s.size() > 0);
 			std::uniform_int_distribution<size_t> d(0, s.size() - 1);
 			nextLeaders.push_back(*s[d(globalRand)]);
 		}
-		if (verbosity >= 3) {
+		if (verbosity >= 3)
 			cerr << "Found " << nextLeaders.size() << " leaders :" << std::endl;
-			for (auto &l : nextLeaders) {
-				//cerr << " -: " << l << std::endl;
-			}
-		}
 
 		// list of objectives
 		unordered_set<string> objectivesList;
@@ -621,7 +618,7 @@ template <typename DNA> class GA {
 		}
 
 		// creating the new population
-		lastGen = population;
+		vector<Individual<DNA>> nextGen;
 		for (const auto &o : objectivesList) {
 			assert(totalAdjustedFitness[o] != 0);
 			for (size_t i = 0; i < species.size(); ++i) {
@@ -631,14 +628,15 @@ template <typename DNA> class GA {
 				                         static_cast<double>(objectivesList.size())) *
 				                        adjustedFitnessSum[i][o] / totalAdjustedFitness[o]);
 
-				population.reserve(population.size() + nOffsprings);
+				nOffsprings = std::max(static_cast<int>(nOffsprings), 1);
+				nextGen.reserve(nextGen.size() + nOffsprings);
 				auto specieOffsprings = produceNOffsprings(nOffsprings, s, nbElites);
-				population.insert(population.end(),
-				                  std::make_move_iterator(specieOffsprings.begin()),
-				                  std::make_move_iterator(specieOffsprings.end()));
+				nextGen.insert(nextGen.end(), std::make_move_iterator(specieOffsprings.begin()),
+				               std::make_move_iterator(specieOffsprings.end()));
 			}
 		}
-		population.clear();
+		lastGen = population;
+		population = nextGen;
 
 		if (verbosity >= 3)
 			cerr << "Created the new population. Population.size = " << population.size()
@@ -651,6 +649,9 @@ template <typename DNA> class GA {
 			offspring.dna.mutate();
 			offspring.evaluated = false;
 			population.push_back(offspring);
+		}
+		while (population.size() > popSize) {
+			population.erase(population.begin());
 		}
 		assert(population.size() == popSize);
 
@@ -691,15 +692,40 @@ template <typename DNA> class GA {
 		                         // them with new individuals. We use this because we cannot
 		                         // directly delete individuals from the population without
 		                         // invalidating all other pointers;
+		size_t cpt = 0;
+		size_t minSize = std::max(static_cast<int>(species[0].size()), 1);
+
+		if (verbosity >= 3) {
+			cerr << "Species sizes : " << std::endl;
+			for (auto &s : species) {
+				cerr << " - " << s.size() << std::endl;
+			}
+		}
+		for (auto &s : species)
+			if (minSize > s.size() && s.size() > 0) minSize = s.size();
+		minSize = std::min(minSize, minSpecieSize);
+
 		for (auto it = species.begin(); it != species.end();) {
-			if ((*it).size() < minSpecieSize) {
+			if ((*it).size() < minSize) {
 				for (auto &i : *it) toReplace.push_back(i);
 				it = species.erase(it);
-			} else
+				nextLeaders.erase(nextLeaders.begin() + cpt);
+				speciationThresholds.erase(speciationThresholds.begin() + cpt);
+			} else {
 				++it;
+				++cpt;
+			}
 		}
-		if (verbosity >= 3)
+
+		assert(species.size() == nextLeaders.size());
+		assert(species.size() == speciationThresholds.size());
+
+		if (verbosity >= 3) {
 			cerr << "Need to replace " << toReplace.size() << " individuals" << std::endl;
+			for (auto &i : toReplace) {
+				cerr << " : " << i << ", f = " << i->fitnesses.size() << std::endl;
+			}
+		}
 
 		// replacing all "deleted" individuals and putting them in existing species
 		for (auto &i : toReplace) {
@@ -712,7 +738,12 @@ template <typename DNA> class GA {
 			do {
 				if (c++ > MAX_SPECIATION_TRIES)
 					throw std::runtime_error("Too many tries. Speciation thresholds too low.");
-				i->dna = selection(species[leaderID])->dna;
+				// /!\ Selection cannot work properly here, as lots of new individuals haven't
+				// been evaluated yet.
+				// i->dna = selection(species[leaderID])->dna;
+				std::cerr << "leaderID = " << leaderID << ", nl size = " << nextLeaders.size()
+				          << std::endl;
+				i->dna = nextLeaders[leaderID].dna;
 				i->dna.mutate();
 			} while (indDistanceFunction(*i, nextLeaders[leaderID]) >
 			         speciationThresholds[leaderID]);
@@ -740,6 +771,10 @@ template <typename DNA> class GA {
 				cerr << " " << s;
 			}
 			cerr << std::endl;
+			cerr << "Species sizes : " << std::endl;
+			for (auto &s : species) {
+				cerr << " - " << s.size() << std::endl;
+			}
 		}
 	}
 
@@ -786,14 +821,18 @@ template <typename DNA> class GA {
 			if (verbosity >= 3) cerr << "pushing" << endl;
 			nextGen.push_back(offspring);
 		}
-		if (verbosity >= 3) cerr << "done" << endl;
+		if (verbosity >= 3) {
+			cerr << "done" << endl;
+			std::cerr << "nextGen.size() = " << nextGen.size() << ", n = " << n << std::endl;
+		}
 		assert(nextGen.size() == n);
 		return nextGen;
 	}
 
 	bool paretoDominates(const Individual<DNA> &a, const Individual<DNA> &b) const {
-		for (auto &o : a.fitnesses)
+		for (auto &o : a.fitnesses) {
 			if (!isBetter(o.second, b.fitnesses.at(o.first))) return false;
+		}
 		return true;
 	}
 
@@ -890,33 +929,25 @@ template <typename DNA> class GA {
 			cerr << "getElites : nbObj = " << obj.size() << " n = " << n << endl;
 		}
 		unordered_map<string, vector<Individual<DNA>>> elites;
-		std::cerr << "yo 0" << std::endl;
 		for (auto &o : obj) {
-			std::cerr << "yo 1" << std::endl;
 			elites[o] = vector<Individual<DNA>>();
 			elites[o].push_back(ref(popVec[0]));
 			size_t worst = 0;
-			std::cerr << "yo 2" << std::endl;
 			for (size_t i = 1; i < n && i < popVec.size(); ++i) {
 				elites[o].push_back(ref(popVec[i]));
 				if (isBetter(elites[o][worst].fitnesses.at(o), ref(popVec[i]).fitnesses.at(o)))
 					worst = i;
 			}
-			std::cerr << "yo 3" << std::endl;
 			for (size_t i = n; i < popVec.size(); ++i) {
-				std::cerr << "yo 0 3" << std::endl;
 				if (isBetter(ref(popVec[i]).fitnesses.at(o), elites[o][worst].fitnesses.at(o))) {
-					std::cerr << "yo 1 3" << std::endl;
 					elites[o][worst] = ref(popVec[i]);
 					for (size_t j = 0; j < n; ++j) {
 						if (isBetter(elites[o][worst].fitnesses.at(o), elites[o][j].fitnesses.at(o)))
 							worst = j;
 					}
-					std::cerr << "yo 2 3" << std::endl;
 				}
 			}
 		}
-		std::cerr << "yo 4" << std::endl;
 		return elites;
 	}
 
