@@ -572,13 +572,17 @@ template <typename DNA> class GA {
 		assert(species.size() == speciationThresholds.size());
 
 		vector<Individual<DNA>> nextLeaders;
-		vector<vector<Iptr>> newSpecies;
 		// New species leaders
 		for (auto &s : species) {
 			std::uniform_int_distribution<size_t> d(0, s.size() - 1);
 			nextLeaders.push_back(*s[d(globalRand)]);
 		}
-		if (verbosity >= 3) cerr << "Found " << nextLeaders.size() << " leaders" << std::endl;
+		if (verbosity >= 3) {
+			cerr << "Found " << nextLeaders.size() << " leaders :" << std::endl;
+			for (auto &l : nextLeaders) {
+				//cerr << " -: " << l << std::endl;
+			}
+		}
 
 		// list of objectives
 		unordered_set<string> objectivesList;
@@ -618,12 +622,10 @@ template <typename DNA> class GA {
 
 		// creating the new population
 		lastGen = population;
-		population.clear();
 		for (const auto &o : objectivesList) {
 			assert(totalAdjustedFitness[o] != 0);
 			for (size_t i = 0; i < species.size(); ++i) {
 				auto &s = species[i];
-				population.clear();
 				size_t nOffsprings =  // nb of offsprings the specie is authorized to produce
 				    static_cast<size_t>((static_cast<double>(popSize) /
 				                         static_cast<double>(objectivesList.size())) *
@@ -636,6 +638,7 @@ template <typename DNA> class GA {
 				                  std::make_move_iterator(specieOffsprings.end()));
 			}
 		}
+		population.clear();
 
 		if (verbosity >= 3)
 			cerr << "Created the new population. Population.size = " << population.size()

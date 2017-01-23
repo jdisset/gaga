@@ -53,6 +53,16 @@ void helpersMethods() {
 	REQUIRE(ga.population[49].dna.value == N - 1);
 	ga.evaluate();
 
+	// Produce N Offsprings
+	auto offsprings = ga.produceNOffsprings(2, ga.population);
+	REQUIRE(offsprings.size() == 2);
+	std::vector<GAGA::Individual<IntDNA> *> indPointers;
+	for (size_t i = 0; i < ga.population.size(); ++i) {
+		indPointers.push_back(&ga.population[i]);
+	}
+	auto newOffsprings = ga.produceNOffsprings(2, indPointers);
+	REQUIRE(newOffsprings.size() == 2);
+
 	// ELITISM
 	// -> from main population
 	auto elites = ga.getElites(1);
