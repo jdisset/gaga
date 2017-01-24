@@ -245,7 +245,7 @@ template <typename DNA> class GA {
 	void setCrossoverProba(double p) {
 		crossoverProba = p <= 1.0 ? (p >= 0.0 ? p : 0.0) : 1.0;
 	}
-	double getCrossoverProba() { return mutationProba; }
+	double getCrossoverProba() { return crossoverProba; }
 	void setMutationProba(double p) {
 		mutationProba = p <= 1.0 ? (p >= 0.0 ? p : 0.0) : 1.0;
 	}
