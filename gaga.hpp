@@ -309,6 +309,9 @@ template <typename DNA> class GA {
 
 	////////////////////////////////////////////////////////////////////////////////////
 
+	std::random_device rd;
+	std::default_random_engine globalRand = std::default_random_engine(rd());
+
  protected:
 	vector<Individual<DNA>>
 	    archive;  // when novelty is enabled, we store the novel individuals there
@@ -321,9 +324,6 @@ template <typename DNA> class GA {
 	char **argv = nullptr;
 
 	std::vector<std::map<std::string, std::map<std::string, double>>> genStats;
-
-	std::random_device rd;
-	std::default_random_engine globalRand = std::default_random_engine(rd());
 
 	std::function<void(Individual<DNA> &)> evaluator;
 	std::function<void(void)> newGenerationFunction = []() {};
@@ -655,6 +655,9 @@ template <typename DNA> class GA {
 		}
 		assert(population.size() == popSize);
 
+		// reevaluating the new guys
+		evaluate();
+
 		// creating new species
 		species.clear();
 		species.resize(nextLeaders.size());
@@ -693,7 +696,6 @@ template <typename DNA> class GA {
 		                         // directly delete individuals from the population without
 		                         // invalidating all other pointers;
 		size_t cpt = 0;
-		size_t minSize = std::max(static_cast<int>(species[0].size()), 1);
 
 		if (verbosity >= 3) {
 			cerr << "Species sizes : " << std::endl;
@@ -701,12 +703,9 @@ template <typename DNA> class GA {
 				cerr << " - " << s.size() << std::endl;
 			}
 		}
-		for (auto &s : species)
-			if (minSize > s.size() && s.size() > 0) minSize = s.size();
-		minSize = std::min(minSize, minSpecieSize);
 
 		for (auto it = species.begin(); it != species.end();) {
-			if ((*it).size() < minSize) {
+			if ((*it).size() < minSpecieSize && species.size() > 0) {
 				for (auto &i : *it) toReplace.push_back(i);
 				it = species.erase(it);
 				nextLeaders.erase(nextLeaders.begin() + cpt);
@@ -719,6 +718,7 @@ template <typename DNA> class GA {
 
 		assert(species.size() == nextLeaders.size());
 		assert(species.size() == speciationThresholds.size());
+		assert(species.size() <= popSize / minSpecieSize);
 
 		if (verbosity >= 3) {
 			cerr << "Need to replace " << toReplace.size() << " individuals" << std::endl;
@@ -740,11 +740,7 @@ template <typename DNA> class GA {
 					throw std::runtime_error("Too many tries. Speciation thresholds too low.");
 				// /!\ Selection cannot work properly here, as lots of new individuals haven't
 				// been evaluated yet.
-				// i->dna = selection(species[leaderID])->dna;
-				std::cerr << "leaderID = " << leaderID << ", nl size = " << nextLeaders.size()
-				          << std::endl;
-				i->dna = nextLeaders[leaderID].dna;
-				i->dna.mutate();
+				i->dna = selection(species[leaderID])->dna;
 			} while (indDistanceFunction(*i, nextLeaders[leaderID]) >
 			         speciationThresholds[leaderID]);
 		}
@@ -1199,7 +1195,9 @@ template <typename DNA> class GA {
 		std::cout << tableCenteredText(l, output.str(), BLUEBOLD NORMAL BLUE NORMAL);
 		output = std::ostringstream();
 		output << GREYBOLD << "(" << globalStats.at("nEvals") << " evaluations, "
-		       << globalStats.at("nObjs") << " objs)" << NORMAL;
+		       << globalStats.at("nObjs") << " objs";
+		if (speciation) output << ", " << species.size() << " species";
+		output << ")" << NORMAL;
 		std::cout << tableCenteredText(l, output.str(), GREYBOLD NORMAL);
 		std::cout << tableSeparation(l);
 		double timeRatio = 0;
