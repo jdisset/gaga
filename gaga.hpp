@@ -115,6 +115,7 @@ template <typename DNA> struct Individual {
 	bool evaluated = false;
 	bool wasAlreadyEvaluated = false;
 	double evalTime = 0.0;
+	map<string, double> stats;  // custom stats
 
 	Individual() {}
 	explicit Individual(const DNA &d) : dna(d) {}
@@ -233,7 +234,9 @@ template <typename DNA> class GA {
 	void disableArchiveSave() { saveArchiveEnabled = false; }
 	void setVerbosity(unsigned int lvl) { verbosity = lvl <= 3 ? (lvl >= 0 ? lvl : 0) : 3; }
 	void setPopSize(size_t s) { popSize = s; }
+	size_t getPopSize() { return popSize; }
 	void setNbElites(size_t n) { nbElites = n; }
+	size_t getNbElites() { return nbElites; }
 	void setNbSavedElites(size_t n) { nbSavedElites = n; }
 	void setTournamentSize(size_t n) { tournamentSize = n; }
 	void setPopSaveInterval(unsigned int n) { savePopInterval = n; }
@@ -242,9 +245,11 @@ template <typename DNA> class GA {
 	void setCrossoverProba(double p) {
 		crossoverProba = p <= 1.0 ? (p >= 0.0 ? p : 0.0) : 1.0;
 	}
+	double getCrossoverProba() { return mutationProba; }
 	void setMutationProba(double p) {
 		mutationProba = p <= 1.0 ? (p >= 0.0 ? p : 0.0) : 1.0;
 	}
+	double getMutationProba() { return mutationProba; }
 	void setEvaluator(std::function<void(Individual<DNA> &)> e,
 	                  std::string ename = "anonymousEvaluator") {
 		evaluator = e;
@@ -284,8 +289,11 @@ template <typename DNA> class GA {
 	// for novelty:
 	void enableNovelty() { novelty = true; }
 	void disableNovelty() { novelty = false; }
+	bool noveltyEnabled() { return novelty; }
 	void setKNN(size_t n) { KNN = n; }
+	size_t getKNN() { return KNN; }
 	void setMinNoveltyForArchive(double m) { minNoveltyForArchive = m; }
+	double getMinNoveltyForArchive() { return minNoveltyForArchive; }
 
 	// for speciation:
 	void enableSpeciation() {
@@ -296,11 +304,18 @@ template <typename DNA> class GA {
 		nextGeneration = [this]() { classicNextGen(); };
 		speciation = false;
 	}
+
+	bool speciationEnabled() { return speciation; }
 	void setMinSpeciationThreshold(double s) { minSpeciationThreshold = s; }
+	double getMinSpeciationThreshold() { return minSpeciationThreshold; }
 	void setMaxSpeciationThreshold(double s) { maxSpeciationThreshold = s; }
+	double getMaxSpeciationThreshold() { return maxSpeciationThreshold; }
 	void setSpeciationThreshold(double s) { speciationThreshold = s; }
+	double getSpeciationThreshold() { return speciationThreshold; }
 	void setSpeciationThresholdIncrement(double s) { speciationThresholdIncrement = s; }
+	double getSpeciationThresholdIncrement() { return speciationThresholdIncrement; }
 	void setMinSpecieSize(double s) { minSpecieSize = s; }
+	double getMinSpecieSize() { return minSpecieSize; }
 	void setIndDistanceFunction(
 	    std::function<double(const Individual<DNA> &, const Individual<DNA> &)> f) {
 		indDistanceFunction = f;
@@ -427,11 +442,11 @@ template <typename DNA> class GA {
 				auto tg1 = high_resolution_clock::now();
 				double totalTime = std::chrono::duration<double>(tg1 - tg0).count();
 				auto tnp0 = high_resolution_clock::now();
-				if (currentGeneration % savePopInterval == 0) {
+				if (savePopInterval > 0 && currentGeneration % savePopInterval == 0) {
 					if (savePopEnabled) savePop();
 					if (novelty && saveArchiveEnabled) saveArchive();
 				}
-				if (currentGeneration % saveGenInterval == 0) {
+				if (saveGenInterval > 0 && currentGeneration % saveGenInterval == 0) {
 					if (doSaveParetoFront) {
 						saveParetoFront();
 					} else {
@@ -1162,6 +1177,37 @@ template <typename DNA> class GA {
 			currentGenStats[o.first] = {
 			    {{"avg", 0.0}, {"worst", o.second}, {"best", o.second}}};
 		}
+		// computing min, avg, max from custom individual stats
+		auto customStatsNames = lastGen[0].stats;
+		map<string, std::tuple<double, double, double>> customStats;
+		for (auto &csn : customStatsNames)
+			customStats[csn.first] = {std::numeric_limits<double>::max(), 0.0,
+			                          std::numeric_limits<double>::min()};
+		for (auto &ind : lastGen) {
+			for (auto &cs : customStats) {
+				double v = ind.stats.at(cs.first);
+				if (v < std::get<0>(cs.second)) std::get<0>(cs.second) = v;
+				if (v > std::get<2>(cs.second)) std::get<2>(cs.second) = v;
+				std::get<1>(cs.second) += v / static_cast<double>(lastGen.size());
+			}
+		}
+		for (auto &cs : customStats) {
+			{
+				std::ostringstream n;
+				n << cs.first << "_min";
+				currentGenStats["custom"][n.str()] = std::get<0>(cs.second);
+			}
+			{
+				std::ostringstream n;
+				n << cs.first << "_avg";
+				currentGenStats["custom"][n.str()] = std::get<1>(cs.second);
+			}
+			{
+				std::ostringstream n;
+				n << cs.first << "_max";
+				currentGenStats["custom"][n.str()] = std::get<2>(cs.second);
+			}
+		}
 		for (const auto &ind : lastGen) {
 			indTotalTime += ind.evalTime;
 			for (const auto &o : ind.fitnesses) {
@@ -1210,7 +1256,7 @@ template <typename DNA> class GA {
 		std::cout << tableCenteredText(l, output.str(), CYANBOLD NORMAL BLUE NORMAL "      ");
 		std::cout << tableSeparation(l);
 		for (const auto &o : genStats[n]) {
-			if (o.first != "global") {
+			if (o.first != "global" && o.first != "custom") {
 				output = std::ostringstream();
 				output << GREYBOLD << "--◇" << GREENBOLD << std::setw(10) << o.first << GREYBOLD
 				       << " ❯ " << NORMAL << " worst: " << YELLOW << std::setw(12)
@@ -1220,6 +1266,15 @@ template <typename DNA> class GA {
 				std::cout << tableText(l, output.str(),
 				                       "    " GREYBOLD GREENBOLD GREYBOLD NORMAL YELLOWBOLD NORMAL
 				                           YELLOW NORMAL GREENBOLD NORMAL);
+			}
+		}
+		if (genStats[n].count("custom")) {
+			std::cout << tableSeparation(l);
+			for (const auto &o : genStats[n]["custom"]) {
+				output = std::ostringstream();
+				output << GREENBOLD << std::setw(15) << o.first << GREYBOLD << " ❯ " << NORMAL
+				       << std::setw(15) << o.second;
+				std::cout << tableCenteredText(l, output.str(), GREENBOLD GREYBOLD NORMAL);
 			}
 		}
 		std::cout << tableFooter(l);
@@ -1232,8 +1287,9 @@ template <typename DNA> class GA {
 			output << " " << o.first << ": " << BLUEBOLD << std::setw(12) << o.second << NORMAL
 			       << GREYBOLD << " |" << NORMAL;
 		output << " 🕝 : " << BLUE << ind.evalTime << "s" << NORMAL;
+		for (const auto &o : ind.stats) output << " ; " << o.first << ": " << o.second;
 		if (ind.wasAlreadyEvaluated)
-			output << GREYBOLD << " (already evaluated)\n" << NORMAL;
+			output << GREYBOLD << " | (already evaluated)\n" << NORMAL;
 		else
 			output << "\n";
 		if ((!novelty && verbosity >= 2) || verbosity >= 3) output << ind.infos << std::endl;
@@ -1390,6 +1446,7 @@ template <typename DNA> class GA {
 		if (!indStatsWritten) {
 			csv << "generation,idInd,";
 			for (auto &o : lastGen[0].fitnesses) csv << o.first << ",";
+			for (auto &o : lastGen[0].stats) csv << o.first << ",";
 			csv << "time" << std::endl;
 			indStatsWritten = true;
 		}
@@ -1397,6 +1454,7 @@ template <typename DNA> class GA {
 			const auto &p = lastGen[i];
 			csv << currentGeneration << "," << i << ",";
 			for (auto &o : p.fitnesses) csv << o.second << ",";
+			for (auto &o : p.stats) csv << o.second << ",";
 			csv << p.evalTime << std::endl;
 		}
 		std::ofstream fs;
