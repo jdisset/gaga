@@ -373,6 +373,12 @@ template <typename DNA> class GA {
 #endif
 	}
 
+	~GA() {
+#ifdef CLUSTER
+		MPI_Finalize();
+#endif
+	}
+
 	/*********************************************************************************
 	 *                          START THE BOUZIN
 	 ********************************************************************************/
@@ -397,6 +403,9 @@ template <typename DNA> class GA {
 	}
 
 	void evaluate() {
+#ifdef CLUSTER
+		MPI_distributePopulation();
+#endif
 #ifdef OMP
 #pragma omp parallel for schedule(dynamic, 1)
 #endif
@@ -416,6 +425,9 @@ template <typename DNA> class GA {
 			}
 			if (verbosity >= 2) printIndividualStats(population[i]);
 		}
+#ifdef CLUSTER
+		MPI_receivePopulation();
+#endif
 	}
 
 	// "Vroum vroum"
@@ -428,17 +440,11 @@ template <typename DNA> class GA {
 		for (int nbg = 0; nbg < nbGeneration; ++nbg) {
 			newGenerationFunction();
 			auto tg0 = high_resolution_clock::now();
-#ifdef CLUSTER
-			MPI_distributePopulation();
-#endif
-			evaluate();
-#ifdef CLUSTER
-			MPI_receivePopulation();
-#endif
+			nextGeneration();
 			if (procId == 0) {
+				assert(lastGen.size());
 				if (population.size() != popSize)
 					throw std::invalid_argument("Population doesn't match the popSize param");
-				if (novelty) updateNovelty();
 				auto tg1 = high_resolution_clock::now();
 				double totalTime = std::chrono::duration<double>(tg1 - tg0).count();
 				auto tnp0 = high_resolution_clock::now();
@@ -453,9 +459,6 @@ template <typename DNA> class GA {
 						saveBests(nbSavedElites);
 					}
 				}
-
-				nextGeneration();
-
 				updateStats(totalTime);
 				if (verbosity >= 1) printGenStats(currentGeneration);
 				if (doSaveGenStats) saveGenStats();
@@ -469,12 +472,6 @@ template <typename DNA> class GA {
 			}
 			++currentGeneration;
 		}
-	}
-
-	void finish() {
-#ifdef CLUSTER
-		MPI_Finalize();
-#endif
 	}
 
 // MPI specifics
@@ -550,6 +547,8 @@ template <typename DNA> class GA {
 	 *                            NEXT POP GETTING READY
 	 ********************************************************************************/
 	void classicNextGen() {
+		evaluate();
+		if (novelty) updateNovelty();
 		auto nextGen = produceNOffsprings(popSize, population, nbElites);
 		lastGen = population;
 		population = nextGen;
@@ -567,9 +566,11 @@ template <typename DNA> class GA {
 	// - c'est reparti :D
 
 	void speciationNextGen() {
-		// TODO : for now it only works with mawimization
+		// TODO : for now it only works with maximization
 		// minimization would require a modification in the nOffsprings
 		// and in the worstFitness computations
+
+		evaluate();
 
 		if (verbosity >= 3) cerr << "Starting to prepare next speciated gen" << std::endl;
 		assert(nbElites < minSpecieSize);
@@ -673,6 +674,7 @@ template <typename DNA> class GA {
 		// reevaluating the new guys
 		evaluate();
 
+		if (novelty) updateNovelty();
 		// creating new species
 		species.clear();
 		species.resize(nextLeaders.size());
@@ -681,11 +683,16 @@ template <typename DNA> class GA {
 			size_t closestLeader = 0;
 			double closestDist = std::numeric_limits<double>::max();
 			bool foundSpecie = false;
-			for (size_t l = 0; l < nextLeaders.size(); ++l) {
-				double dist = indDistanceFunction(nextLeaders[l], i);
-				if (dist < closestDist && dist < speciationThresholds[l]) {
-					closestDist = dist;
-					closestLeader = l;
+			vector<double> distances(nextLeaders.size());
+#ifdef OMP
+#pragma omp parallel for
+#endif
+			for (size_t l = 0; l < nextLeaders.size(); ++l)
+				distances[l] = indDistanceFunction(nextLeaders[l], i);
+			for (size_t d = 0; d < distances.size(); ++d) {
+				if (distances[d] < closestDist && distances[d] < speciationThresholds[d]) {
+					closestDist = distances[d];
+					closestLeader = d;
 					foundSpecie = true;
 				}
 			}
@@ -742,8 +749,12 @@ template <typename DNA> class GA {
 			}
 		}
 
-		// replacing all "deleted" individuals and putting them in existing species
-		for (auto &i : toReplace) {
+// replacing all "deleted" individuals and putting them in existing species
+#ifdef OMP
+#pragma omp parallel for
+#endif
+		for (size_t tr = 0; tr < toReplace.size(); ++tr) {
+			auto &i = toReplace[tr];
 			// we choose one random specie and mutate individuals until the new ind can fit
 			i->evaluated = false;
 			auto selection = getSelectionMethod<vector<Iptr>>();
@@ -808,8 +819,12 @@ template <typename DNA> class GA {
 
 		auto selection = getSelectionMethod<vector<I>>();
 
-		while (nextGen.size() < n) {
-			if (verbosity >= 3) cerr << "nextGen.size = " << nextGen.size() << endl;
+		auto s = nextGen.size();
+		nextGen.resize(n);
+#ifdef OMP
+#pragma omp parallel for
+#endif
+		for (size_t i = s; i < n; ++i) {
 			// selection + crossover
 			Individual<DNA> *p0 = selection(popu);
 			Individual<DNA> offspring;
@@ -818,7 +833,6 @@ template <typename DNA> class GA {
 				Individual<DNA> *p1 = selection(popu);
 				offspring = Individual<DNA>(p0->dna.crossover(p1->dna));
 				offspring.evaluated = false;
-				if (verbosity >= 3) cerr << "crossover ok" << endl;
 			} else {
 				if (verbosity >= 3) cerr << "no crossover" << endl;
 				offspring = *p0;
@@ -829,12 +843,7 @@ template <typename DNA> class GA {
 				offspring.dna.mutate();
 				offspring.evaluated = false;
 			}
-			if (verbosity >= 3) cerr << "pushing" << endl;
-			nextGen.push_back(offspring);
-		}
-		if (verbosity >= 3) {
-			cerr << "done" << endl;
-			std::cerr << "nextGen.size() = " << nextGen.size() << ", n = " << n << std::endl;
+			nextGen[i] = offspring;
 		}
 		assert(nextGen.size() == n);
 		return nextGen;
@@ -1231,6 +1240,7 @@ template <typename DNA> class GA {
 		genStats.push_back(currentGenStats);
 	}
 
+ public:
 	void printGenStats(size_t n) {
 		const size_t l = 80;
 		std::cout << tableHeader(l);
@@ -1296,6 +1306,7 @@ template <typename DNA> class GA {
 		std::cout << output.str();
 	}
 
+ protected:
 	std::string tableHeader(unsigned int l) {
 		std::ostringstream output;
 		output << "┌";
@@ -1341,17 +1352,19 @@ template <typename DNA> class GA {
 		return output.str();
 	}
 
+ public:
 	/*********************************************************************************
 	 *                         SAVING STUFF
 	 ********************************************************************************/
 	void saveBests(size_t n) {
 		if (n > 0) {
+			const vector<Individual<DNA>> &p = lastGen;
 			// save n bests dnas for all objectives
 			vector<string> objectives;
-			for (auto &o : population[0].fitnesses) {
+			for (auto &o : p[0].fitnesses) {
 				objectives.push_back(o.first);  // we need to know objective functions
 			}
-			auto elites = getElites(objectives, n, population);
+			auto elites = getElites(objectives, n, p);
 			std::stringstream baseName;
 			baseName << folder << "/gen" << currentGeneration;
 			mkdir(baseName.str().c_str(), 0777);
@@ -1376,9 +1389,10 @@ template <typename DNA> class GA {
 	}
 
 	void saveParetoFront() {
+		vector<Individual<DNA>> &p = lastGen;
 		std::vector<Individual<DNA> *> pop;
-		for (size_t i = 0; i < population.size(); ++i) {
-			pop.push_back(&population[i]);
+		for (size_t i = 0; i < p.size(); ++i) {
+			pop.push_back(&p[i]);
 		}
 
 		auto pfront = getParetoFront(pop);
@@ -1538,6 +1552,7 @@ template <typename DNA> class GA {
 		fs.close();
 	}
 
+ protected:
 	int mkpath(char *file_path, mode_t mode) {
 		assert(file_path && *file_path);
 		char *p;
@@ -1597,7 +1612,7 @@ template <typename DNA> class GA {
 	}
 
 	void savePop() {
-		json o = Individual<DNA>::popToJSON(population);
+		json o = Individual<DNA>::popToJSON(lastGen);
 		o["evaluator"] = evaluatorName;
 		o["generation"] = currentGeneration;
 		std::stringstream baseName;
