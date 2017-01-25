@@ -825,8 +825,8 @@ template <typename DNA> class GA {
 
 		auto s = nextGen.size();
 
-		size_t nCross = crossoverProba * (popu.size() - s);
-		size_t nMut = mutationProba * (popu.size() - s);
+		size_t nCross = crossoverProba * (n - s);
+		size_t nMut = mutationProba * (n - s);
 		nextGen.resize(s + nCross + nMut);
 #ifdef OMP
 #pragma omp parallel for
