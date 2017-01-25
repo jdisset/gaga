@@ -1197,8 +1197,8 @@ template <typename DNA> class GA {
 		auto customStatsNames = lastGen[0].stats;
 		map<string, std::tuple<double, double, double>> customStats;
 		for (auto &csn : customStatsNames)
-			customStats[csn.first] = {std::numeric_limits<double>::max(), 0.0,
-			                          std::numeric_limits<double>::min()};
+			customStats[csn.first] = std::make_tuple<double, double, double>(
+			    std::numeric_limits<double>::max(), 0.0, std::numeric_limits<double>::min());
 		for (auto &ind : lastGen) {
 			for (auto &cs : customStats) {
 				double v = ind.stats.at(cs.first);
