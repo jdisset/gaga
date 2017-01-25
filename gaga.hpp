@@ -678,6 +678,7 @@ template <typename DNA> class GA {
 		// creating new species
 		species.clear();
 		species.resize(nextLeaders.size());
+		assert(species.size() > 0);
 		for (auto &i : population) {
 			// finding the closest leader
 			size_t closestLeader = 0;
@@ -709,6 +710,7 @@ template <typename DNA> class GA {
 		if (verbosity >= 3)
 			cerr << "Created the new species. Species size = " << species.size() << std::endl;
 
+		assert(species.size() > 0);
 		assert(species.size() == nextLeaders.size());
 		assert(species.size() == speciationThresholds.size());
 
@@ -727,7 +729,7 @@ template <typename DNA> class GA {
 		}
 
 		for (auto it = species.begin(); it != species.end();) {
-			if ((*it).size() < minSpecieSize && species.size() > 0) {
+			if ((*it).size() < minSpecieSize && species.size() > 1) {
 				for (auto &i : *it) toReplace.push_back(i);
 				it = species.erase(it);
 				nextLeaders.erase(nextLeaders.begin() + cpt);
@@ -738,6 +740,7 @@ template <typename DNA> class GA {
 			}
 		}
 
+		assert(species.size() > 0);
 		assert(species.size() == nextLeaders.size());
 		assert(species.size() == speciationThresholds.size());
 		assert(species.size() <= popSize / minSpecieSize);
@@ -803,6 +806,7 @@ template <typename DNA> class GA {
 	template <typename I>  // I is ither Individual<DNA> or Individual<DNA>*
 	vector<Individual<DNA>> produceNOffsprings(size_t n, vector<I> &popu,
 	                                           size_t nElites = 0) {
+		assert(popu.size() >= nElites);
 		if (verbosity >= 3)
 			cerr << "Going to produce " << n << " offsprings out of " << popu.size()
 			     << " individuals" << endl;
@@ -859,6 +863,7 @@ template <typename DNA> class GA {
 	vector<Individual<DNA> *> getParetoFront(
 	    const std::vector<Individual<DNA> *> &ind) const {
 		// naive algorithm. Should be ok for small ind.size()
+		assert(ind.size() > 0);
 		vector<Individual<DNA> *> pareto;
 		for (size_t i = 0; i < ind.size(); ++i) {
 			bool dominated = false;
@@ -884,6 +889,7 @@ template <typename DNA> class GA {
 	}
 
 	template <typename I> Individual<DNA> *paretoTournament(vector<I> &subPop) {
+		assert(subPop.size() > 0);
 		std::uniform_int_distribution<size_t> dint(0, subPop.size() - 1);
 		std::vector<Individual<DNA> *> participants;
 		for (size_t i = 0; i < tournamentSize; ++i)
@@ -895,6 +901,7 @@ template <typename DNA> class GA {
 	}
 
 	template <typename I> Individual<DNA> *randomObjTournament(vector<I> &subPop) {
+		assert(subPop.size() > 0);
 		if (verbosity >= 3) cerr << "random obj tournament called" << endl;
 		std::uniform_int_distribution<size_t> dint(0, subPop.size() - 1);
 		std::vector<Individual<DNA> *> participants;
