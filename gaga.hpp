@@ -824,31 +824,30 @@ template <typename DNA> class GA {
 		auto selection = getSelectionMethod<vector<I>>();
 
 		auto s = nextGen.size();
-		nextGen.resize(n);
+
+		size_t nCross = crossoverProba * (popu.size() - s);
+		size_t nMut = mutationProba * (popu.size() - s);
+		nextGen.resize(s + nCross + nMut);
 #ifdef OMP
 #pragma omp parallel for
 #endif
-		for (size_t i = s; i < n; ++i) {
-			// selection + crossover
-			Individual<DNA> *p0 = selection(popu);
-			Individual<DNA> offspring;
-			if (d(globalRand) < crossoverProba) {
-				if (verbosity >= 3) cerr << "crossover" << endl;
-				Individual<DNA> *p1 = selection(popu);
-				offspring = Individual<DNA>(p0->dna.crossover(p1->dna));
-				offspring.evaluated = false;
-			} else {
-				if (verbosity >= 3) cerr << "no crossover" << endl;
-				offspring = *p0;
-			}
-			// mutation
-			if (d(globalRand) < mutationProba) {
-				if (verbosity >= 3) cerr << "mutation" << endl;
-				offspring.dna.mutate();
-				offspring.evaluated = false;
-			}
+		for (size_t i = s; i < nCross + s; ++i) {
+			auto *p0 = selection(popu);
+			auto *p1 = selection(popu);
+			Individual<DNA> offspring(p0->dna.crossover(p1->dna));
 			nextGen[i] = offspring;
 		}
+#ifdef OMP
+#pragma omp parallel for
+#endif
+		for (size_t i = nCross + s; i < nMut + nCross + s; ++i) {
+			nextGen[i] = *selection(popu);
+			nextGen[i].dna.mutate();
+			nextGen[i].evaluated = false;
+		}
+
+		while (nextGen.size() < n) nextGen.push_back(*selection(popu));
+
 		assert(nextGen.size() == n);
 		return nextGen;
 	}
