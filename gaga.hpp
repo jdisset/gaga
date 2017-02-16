@@ -457,13 +457,13 @@ template <typename DNA> class GA {
 						saveParetoFront();
 					} else {
 						saveBests(nbSavedElites);
+						if (nbSavedElites > 0) saveBests(nbSavedElites);
 					}
 				}
 				updateStats(totalTime);
 				if (verbosity >= 1) printGenStats(currentGeneration);
 				if (doSaveGenStats) saveGenStats();
 				if (doSaveIndStats) saveIndStats();
-
 				auto tnp1 = high_resolution_clock::now();
 				double tnp = std::chrono::duration<double>(tnp1 - tnp0).count();
 				if (verbosity >= 2) {
