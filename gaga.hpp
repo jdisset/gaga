@@ -23,7 +23,6 @@
 // before including this file,
 // #define OMP if you want OpenMP parallelisation
 // #define CLUSTER if you want MPI parralelisation
-// #define CLUSTER if you want MPI parralelisation
 #ifdef CLUSTER
 #include <mpi.h>
 #include <cstring>
@@ -38,9 +37,9 @@
 #include <algorithm>
 #include <chrono>
 #include <cstring>
-#include <cstring>
 #include <deque>
 #include <fstream>
+#include <iostream>
 #include <map>
 #include <random>
 #include <sstream>
@@ -51,32 +50,32 @@
 #include <vector>
 #include "include/json.hpp"
 
-#define PURPLE "\033[35m"
-#define PURPLEBOLD "\033[1;35m"
-#define BLUE "\033[34m"
-#define BLUEBOLD "\033[1;34m"
-#define GREY "\033[30m"
-#define GREYBOLD "\033[1;30m"
-#define YELLOW "\033[33m"
-#define YELLOWBOLD "\033[1;33m"
-#define RED "\033[31m"
-#define REDBOLD "\033[1;31m"
-#define CYAN "\033[36m"
-#define CYANBOLD "\033[1;36m"
-#define GREEN "\033[32m"
-#define GREENBOLD "\033[1;32m"
-#define NORMAL "\033[0m"
+#define GAGA_COLOR_PURPLE "\033[35m"
+#define GAGA_COLOR_PURPLEBOLD "\033[1;35m"
+#define GAGA_COLOR_BLUE "\033[34m"
+#define GAGA_COLOR_BLUEBOLD "\033[1;34m"
+#define GAGA_COLOR_GREY "\033[30m"
+#define GAGA_COLOR_GREYBOLD "\033[1;30m"
+#define GAGA_COLOR_YELLOW "\033[33m"
+#define GAGA_COLOR_YELLOWBOLD "\033[1;33m"
+#define GAGA_COLOR_RED "\033[31m"
+#define GAGA_COLOR_REDBOLD "\033[1;31m"
+#define GAGA_COLOR_CYAN "\033[36m"
+#define GAGA_COLOR_CYANBOLD "\033[1;36m"
+#define GAGA_COLOR_GREEN "\033[32m"
+#define GAGA_COLOR_GREENBOLD "\033[1;32m"
+#define GAGA_COLOR_NORMAL "\033[0m"
 
 namespace GAGA {
 
-using std::vector;
-using std::string;
-using std::unordered_set;
-using std::map;
-using std::unordered_map;
-using std::cout;
 using std::cerr;
+using std::cout;
 using std::endl;
+using std::map;
+using std::string;
+using std::unordered_map;
+using std::unordered_set;
+using std::vector;
 using fpType = std::vector<std::vector<double>>;  // footprints for novelty
 using json = nlohmann::json;
 using std::chrono::high_resolution_clock;
@@ -117,7 +116,7 @@ template <typename DNA> struct Individual {
 	double evalTime = 0.0;
 	map<string, double> stats;  // custom stats
 
-	Individual() {}
+	// Individual() {}
 	explicit Individual(const DNA &d) : dna(d) {}
 
 	explicit Individual(const json &o) {
@@ -250,7 +249,7 @@ template <typename DNA> class GA {
 		mutationProba = p <= 1.0 ? (p >= 0.0 ? p : 0.0) : 1.0;
 	}
 	double getMutationProba() { return mutationProba; }
-	void setEvaluator(std::function<void(Individual<DNA> &)> e,
+	void setEvaluator(std::function<void(Individual<DNA> &, int)> e,
 	                  std::string ename = "anonymousEvaluator") {
 		evaluator = e;
 		evaluatorName = ename;
@@ -340,7 +339,7 @@ template <typename DNA> class GA {
 
 	std::vector<std::map<std::string, std::map<std::string, double>>> genStats;
 
-	std::function<void(Individual<DNA> &)> evaluator;
+	std::function<void(Individual<DNA> &, int)> evaluator;
 	std::function<void(void)> newGenerationFunction = []() {};
 	std::function<void(void)> nextGeneration = [this]() { classicNextGen(); };
 	std::function<bool(double, double)> isBetter = [](double a, double b) { return a > b; };
@@ -364,8 +363,8 @@ template <typename DNA> class GA {
 		if (procId == 0) {
 			if (verbosity >= 3) {
 				std::cout << "   -------------------" << endl;
-				std::cout << CYAN << " MPI STARTED WITH " << NORMAL << nbProcs << CYAN
-				          << " PROCS " << NORMAL << endl;
+				std::cout << GAGA_COLOR_CYAN << " MPI STARTED WITH " << GAGA_COLOR_NORMAL
+				          << nbProcs << GAGA_COLOR_CYAN << " PROCS " << GAGA_COLOR_NORMAL << endl;
 				std::cout << "   -------------------" << endl;
 				std::cout << "Initialising population in master process" << endl;
 			}
@@ -402,6 +401,20 @@ template <typename DNA> class GA {
 		}
 	}
 
+	template <typename... Args> void printLn(size_t lvl, Args &&... a) {
+		if (verbosity >= lvl) {
+			std::ostringstream output;
+			subPrint(output, std::forward<Args>(a)...);
+			std::cout << output.str();
+		}
+	}
+	template <typename T, typename... Args>
+	void subPrint(std::ostringstream &output, const T &t, Args &&... a) {
+		output << t;
+		subPrint(output, std::forward<Args>(a)...);
+	}
+	void subPrint(std::ostringstream &output) { output << std::endl; }
+
 	void evaluate() {
 #ifdef CLUSTER
 		MPI_distributePopulation();
@@ -410,12 +423,19 @@ template <typename DNA> class GA {
 #pragma omp parallel for schedule(dynamic, 1)
 #endif
 		for (size_t i = 0; i < population.size(); ++i) {
+			printLn(3, "Considering evaluation of ind ", i);
 			if (evaluateAllIndividuals || !population[i].evaluated) {
+				printLn(3, "Going to evaluate ind ", i);
 				auto t0 = high_resolution_clock::now();
 				population[i].dna.reset();
-				evaluator(population[i]);
+#ifdef OMP
+				evaluator(population[i], omp_get_thread_num());
+#else
+				evaluator(population[i], 0);
+#endif
 				auto t1 = high_resolution_clock::now();
 				population[i].evaluated = true;
+				printLn(3, "Ind ", i, " evaluated");
 				double indTime = std::chrono::duration<double>(t1 - t0).count();
 				population[i].evalTime = indTime;
 				population[i].wasAlreadyEvaluated = false;
@@ -506,8 +526,8 @@ template <typename DNA> class GA {
 			if (verbosity >= 3) {
 				std::ostringstream buf;
 				buf << endl
-				    << "Proc " << PURPLE << procId << NORMAL << " : reception of "
-				    << population.size() << " new individuals !" << endl;
+				    << "Proc " << GAGA_COLOR_PURPLE << procId << GAGA_COLOR_NORMAL
+				    << " : reception of " << population.size() << " new individuals !" << endl;
 				cout << buf.str();
 			}
 		}
@@ -827,7 +847,7 @@ template <typename DNA> class GA {
 
 		size_t nCross = crossoverProba * (n - s);
 		size_t nMut = mutationProba * (n - s);
-		nextGen.resize(s + nCross + nMut);
+		nextGen.reserve(nCross + nMut);
 #ifdef OMP
 #pragma omp parallel for
 #endif
@@ -835,15 +855,15 @@ template <typename DNA> class GA {
 			auto *p0 = selection(popu);
 			auto *p1 = selection(popu);
 			Individual<DNA> offspring(p0->dna.crossover(p1->dna));
-			nextGen[i] = offspring;
+			nextGen.push_back(offspring);
 		}
 #ifdef OMP
 #pragma omp parallel for
 #endif
 		for (size_t i = nCross + s; i < nMut + nCross + s; ++i) {
-			nextGen[i] = *selection(popu);
-			nextGen[i].dna.mutate();
-			nextGen[i].evaluated = false;
+			nextGen.push_back(*selection(popu));
+			nextGen.back().dna.mutate();
+			nextGen.back().evaluated = false;
 		}
 
 		while (nextGen.size() < n) nextGen.push_back(*selection(popu));
@@ -1050,8 +1070,8 @@ template <typename DNA> class GA {
 		if (verbosity >= 2) {
 			cout << endl << endl;
 			std::stringstream output;
-			cout << GREY << " ❯❯  " << YELLOW << "COMPUTING NOVELTY " << NORMAL << " ⤵  "
-			     << endl
+			cout << GAGA_COLOR_GREY << " ❯❯  " << GAGA_COLOR_YELLOW << "COMPUTING NOVELTY "
+			     << GAGA_COLOR_NORMAL << " ⤵  " << endl
 			     << endl;
 		}
 		auto savedArchiveSize = archive.size();
@@ -1070,10 +1090,11 @@ template <typename DNA> class GA {
 			if (avgD > best.second) best = {&ind, avgD};
 			if (verbosity >= 2) {
 				std::stringstream output;
-				output << GREY << " ❯ " << endl
-				       << NORMAL << ind.infos << endl
-				       << " -> Novelty = " << CYAN << avgD << GREY
-				       << (added ? " (added to archive)" : " (too low for archive)") << NORMAL;
+				output << GAGA_COLOR_GREY << " ❯ " << endl
+				       << GAGA_COLOR_NORMAL << ind.infos << endl
+				       << " -> Novelty = " << GAGA_COLOR_CYAN << avgD << GAGA_COLOR_GREY
+				       << (added ? " (added to archive)" : " (too low for archive)")
+				       << GAGA_COLOR_NORMAL;
 				if (verbosity >= 3)
 					output << "Footprint was : " << footprintToString(ind.footprint);
 				output << endl;
@@ -1081,7 +1102,8 @@ template <typename DNA> class GA {
 			}
 			ind.fitnesses["novelty"] = avgD;
 		}
-		archive.resize(savedArchiveSize);
+
+		archive.erase(archive.begin() + savedArchiveSize, archive.end());
 		archive.insert(std::end(archive), std::begin(toBeAdded), std::end(toBeAdded));
 		if (verbosity >= 2) {
 			std::stringstream output;
@@ -1121,62 +1143,73 @@ template <typename DNA> class GA {
 	 ********************************************************************************/
 	void printStart() {
 		int nbCol = 55;
-		std::cout << std::endl << GREY;
+		std::cout << std::endl << GAGA_COLOR_GREY;
 		for (int i = 0; i < nbCol - 1; ++i) std::cout << "━";
 		std::cout << std::endl;
-		std::cout << YELLOW << "              ☀     " << NORMAL << " Starting GAGA " << YELLOW
-		          << "    ☀ " << NORMAL;
+		std::cout << GAGA_COLOR_YELLOW << "              ☀     " << GAGA_COLOR_NORMAL
+		          << " Starting GAGA " << GAGA_COLOR_YELLOW << "    ☀ " << GAGA_COLOR_NORMAL;
 		std::cout << std::endl;
-		std::cout << BLUE << "                      ¯\\_ಠ ᴥ ಠ_/¯" << std::endl << GREY;
+		std::cout << GAGA_COLOR_BLUE << "                      ¯\\_ಠ ᴥ ಠ_/¯" << std::endl
+		          << GAGA_COLOR_GREY;
 		for (int i = 0; i < nbCol - 1; ++i) std::cout << "┄";
-		std::cout << std::endl << NORMAL;
-		std::cout << "  ▹ population size = " << BLUE << popSize << NORMAL << std::endl;
-		std::cout << "  ▹ nb of elites = " << BLUE << nbElites << NORMAL << std::endl;
-		std::cout << "  ▹ nb of tournament competitors = " << BLUE << tournamentSize << NORMAL
+		std::cout << std::endl << GAGA_COLOR_NORMAL;
+		std::cout << "  ▹ population size = " << GAGA_COLOR_BLUE << popSize
+		          << GAGA_COLOR_NORMAL << std::endl;
+		std::cout << "  ▹ nb of elites = " << GAGA_COLOR_BLUE << nbElites << GAGA_COLOR_NORMAL
 		          << std::endl;
-		std::cout << "  ▹ selection = " << BLUE << selectMethodToString(selecMethod) << NORMAL
-		          << std::endl;
-		std::cout << "  ▹ mutation rate = " << BLUE << mutationProba << NORMAL << std::endl;
-		std::cout << "  ▹ crossover rate = " << BLUE << crossoverProba << NORMAL << std::endl;
-		std::cout << "  ▹ writing results in " << BLUE << folder << NORMAL << std::endl;
+		std::cout << "  ▹ nb of tournament competitors = " << GAGA_COLOR_BLUE
+		          << tournamentSize << GAGA_COLOR_NORMAL << std::endl;
+		std::cout << "  ▹ selection = " << GAGA_COLOR_BLUE
+		          << selectMethodToString(selecMethod) << GAGA_COLOR_NORMAL << std::endl;
+		std::cout << "  ▹ mutation rate = " << GAGA_COLOR_BLUE << mutationProba
+		          << GAGA_COLOR_NORMAL << std::endl;
+		std::cout << "  ▹ crossover rate = " << GAGA_COLOR_BLUE << crossoverProba
+		          << GAGA_COLOR_NORMAL << std::endl;
+		std::cout << "  ▹ writing results in " << GAGA_COLOR_BLUE << folder
+		          << GAGA_COLOR_NORMAL << std::endl;
 		if (novelty) {
-			std::cout << "  ▹ novelty is " << GREEN << "enabled" << NORMAL << std::endl;
-			std::cout << "    - KNN size = " << BLUE << KNN << NORMAL << std::endl;
+			std::cout << "  ▹ novelty is " << GAGA_COLOR_GREEN << "enabled" << GAGA_COLOR_NORMAL
+			          << std::endl;
+			std::cout << "    - KNN size = " << GAGA_COLOR_BLUE << KNN << GAGA_COLOR_NORMAL
+			          << std::endl;
 		} else {
-			std::cout << "  ▹ novelty is " << RED << "disabled" << NORMAL << std::endl;
+			std::cout << "  ▹ novelty is " << GAGA_COLOR_RED << "disabled" << GAGA_COLOR_NORMAL
+			          << std::endl;
 		}
 		if (speciation) {
-			std::cout << "  ▹ speciation is " << GREEN << "enabled" << NORMAL << std::endl;
-			std::cout << "    - minSpecieSize size = " << BLUE << minSpecieSize << NORMAL
-			          << std::endl;
-			std::cout << "    - speciationThreshold = " << BLUE << speciationThreshold << NORMAL
-			          << std::endl;
-			std::cout << "    - speciationThresholdIncrement = " << BLUE
-			          << speciationThresholdIncrement << NORMAL << std::endl;
-			std::cout << "    - minSpeciationThreshold = " << BLUE << minSpeciationThreshold
-			          << NORMAL << std::endl;
-			std::cout << "    - maxSpeciationThreshold = " << BLUE << maxSpeciationThreshold
-			          << NORMAL << std::endl;
+			std::cout << "  ▹ speciation is " << GAGA_COLOR_GREEN << "enabled"
+			          << GAGA_COLOR_NORMAL << std::endl;
+			std::cout << "    - minSpecieSize size = " << GAGA_COLOR_BLUE << minSpecieSize
+			          << GAGA_COLOR_NORMAL << std::endl;
+			std::cout << "    - speciationThreshold = " << GAGA_COLOR_BLUE
+			          << speciationThreshold << GAGA_COLOR_NORMAL << std::endl;
+			std::cout << "    - speciationThresholdIncrement = " << GAGA_COLOR_BLUE
+			          << speciationThresholdIncrement << GAGA_COLOR_NORMAL << std::endl;
+			std::cout << "    - minSpeciationThreshold = " << GAGA_COLOR_BLUE
+			          << minSpeciationThreshold << GAGA_COLOR_NORMAL << std::endl;
+			std::cout << "    - maxSpeciationThreshold = " << GAGA_COLOR_BLUE
+			          << maxSpeciationThreshold << GAGA_COLOR_NORMAL << std::endl;
 		} else {
-			std::cout << "  ▹ speciation is " << RED << "disabled" << NORMAL << std::endl;
+			std::cout << "  ▹ speciation is " << GAGA_COLOR_RED << "disabled"
+			          << GAGA_COLOR_NORMAL << std::endl;
 		}
 #ifdef CLUSTER
-		std::cout << "  ▹ MPI parallelisation is " << GREEN << "enabled" << NORMAL
-		          << std::endl;
+		std::cout << "  ▹ MPI parallelisation is " << GAGA_COLOR_GREEN << "enabled"
+		          << GAGA_COLOR_NORMAL << std::endl;
 #else
-		std::cout << "  ▹ MPI parallelisation is " << RED << "disabled" << NORMAL
-		          << std::endl;
+		std::cout << "  ▹ MPI parallelisation is " << GAGA_COLOR_RED << "disabled"
+		          << GAGA_COLOR_NORMAL << std::endl;
 #endif
 #ifdef OMP
-		std::cout << "  ▹ OpenMP parallelisation is " << GREEN << "enabled" << NORMAL
-		          << std::endl;
+		std::cout << "  ▹ OpenMP parallelisation is " << GAGA_COLOR_GREEN << "enabled"
+		          << GAGA_COLOR_NORMAL << std::endl;
 #else
-		std::cout << "  ▹ OpenMP parallelisation is " << RED << "disabled" << NORMAL
-		          << std::endl;
+		std::cout << "  ▹ OpenMP parallelisation is " << GAGA_COLOR_RED << "disabled"
+		          << GAGA_COLOR_NORMAL << std::endl;
 #endif
-		std::cout << GREY;
+		std::cout << GAGA_COLOR_GREY;
 		for (int i = 0; i < nbCol - 1; ++i) std::cout << "━";
-		std::cout << NORMAL << std::endl;
+		std::cout << GAGA_COLOR_NORMAL << std::endl;
 	}
 	void updateStats(double totalTime) {
 		// stats organisations :
@@ -1252,45 +1285,58 @@ template <typename DNA> class GA {
 		std::cout << tableHeader(l);
 		std::ostringstream output;
 		const auto &globalStats = genStats[n].at("global");
-		output << "Generation " << CYANBOLD << n << NORMAL << " ended in " << BLUE
-		       << globalStats.at("genTotalTime") << NORMAL << "s";
-		std::cout << tableCenteredText(l, output.str(), BLUEBOLD NORMAL BLUE NORMAL);
+		output << "Generation " << GAGA_COLOR_CYANBOLD << n << GAGA_COLOR_NORMAL
+		       << " ended in " << GAGA_COLOR_BLUE << globalStats.at("genTotalTime")
+		       << GAGA_COLOR_NORMAL << "s";
+		std::cout << tableCenteredText(
+		    l, output.str(),
+		    GAGA_COLOR_BLUEBOLD GAGA_COLOR_NORMAL GAGA_COLOR_BLUE GAGA_COLOR_NORMAL);
 		output = std::ostringstream();
-		output << GREYBOLD << "(" << globalStats.at("nEvals") << " evaluations, "
+		output << GAGA_COLOR_GREYBOLD << "(" << globalStats.at("nEvals") << " evaluations, "
 		       << globalStats.at("nObjs") << " objs";
 		if (speciation) output << ", " << species.size() << " species";
-		output << ")" << NORMAL;
-		std::cout << tableCenteredText(l, output.str(), GREYBOLD NORMAL);
+		output << ")" << GAGA_COLOR_NORMAL;
+		std::cout << tableCenteredText(l, output.str(),
+		                               GAGA_COLOR_GREYBOLD GAGA_COLOR_NORMAL);
 		std::cout << tableSeparation(l);
 		double timeRatio = 0;
 		if (globalStats.at("genTotalTime") > 0)
 			timeRatio = globalStats.at("indTotalTime") / globalStats.at("genTotalTime");
 		output = std::ostringstream();
-		output << "🕝  max: " << BLUE << globalStats.at("maxTime") << NORMAL << "s";
-		output << ", 🕝  sum: " << BLUEBOLD << globalStats.at("indTotalTime") << NORMAL
-		       << "s (x" << timeRatio << " ratio)";
-		std::cout << tableCenteredText(l, output.str(), CYANBOLD NORMAL BLUE NORMAL "      ");
+		output << "🕝  max: " << GAGA_COLOR_BLUE << globalStats.at("maxTime")
+		       << GAGA_COLOR_NORMAL << "s";
+		output << ", 🕝  sum: " << GAGA_COLOR_BLUEBOLD << globalStats.at("indTotalTime")
+		       << GAGA_COLOR_NORMAL << "s (x" << timeRatio << " ratio)";
+		std::cout << tableCenteredText(
+		    l, output.str(),
+		    GAGA_COLOR_CYANBOLD GAGA_COLOR_NORMAL GAGA_COLOR_BLUE GAGA_COLOR_NORMAL "      ");
 		std::cout << tableSeparation(l);
 		for (const auto &o : genStats[n]) {
 			if (o.first != "global" && o.first != "custom") {
 				output = std::ostringstream();
-				output << GREYBOLD << "--◇" << GREENBOLD << std::setw(10) << o.first << GREYBOLD
-				       << " ❯ " << NORMAL << " worst: " << YELLOW << std::setw(12)
-				       << o.second.at("worst") << NORMAL << ", avg: " << YELLOWBOLD
-				       << std::setw(12) << o.second.at("avg") << NORMAL << ", best: " << REDBOLD
-				       << std::setw(12) << o.second.at("best") << NORMAL;
-				std::cout << tableText(l, output.str(),
-				                       "    " GREYBOLD GREENBOLD GREYBOLD NORMAL YELLOWBOLD NORMAL
-				                           YELLOW NORMAL GREENBOLD NORMAL);
+				output << GAGA_COLOR_GREYBOLD << "--◇" << GAGA_COLOR_GREENBOLD << std::setw(10)
+				       << o.first << GAGA_COLOR_GREYBOLD << " ❯ " << GAGA_COLOR_NORMAL
+				       << " worst: " << GAGA_COLOR_YELLOW << std::setw(12) << o.second.at("worst")
+				       << GAGA_COLOR_NORMAL << ", avg: " << GAGA_COLOR_YELLOWBOLD << std::setw(12)
+				       << o.second.at("avg") << GAGA_COLOR_NORMAL
+				       << ", best: " << GAGA_COLOR_REDBOLD << std::setw(12) << o.second.at("best")
+				       << GAGA_COLOR_NORMAL;
+				std::cout << tableText(
+				    l, output.str(),
+				    "    " GAGA_COLOR_GREYBOLD GAGA_COLOR_GREENBOLD GAGA_COLOR_GREYBOLD
+				        GAGA_COLOR_NORMAL GAGA_COLOR_YELLOWBOLD GAGA_COLOR_NORMAL
+				            GAGA_COLOR_YELLOW GAGA_COLOR_NORMAL GAGA_COLOR_GREENBOLD
+				                GAGA_COLOR_NORMAL);
 			}
 		}
 		if (genStats[n].count("custom")) {
 			std::cout << tableSeparation(l);
 			for (const auto &o : genStats[n]["custom"]) {
 				output = std::ostringstream();
-				output << GREENBOLD << std::setw(15) << o.first << GREYBOLD << " ❯ " << NORMAL
-				       << std::setw(15) << o.second;
-				std::cout << tableCenteredText(l, output.str(), GREENBOLD GREYBOLD NORMAL);
+				output << GAGA_COLOR_GREENBOLD << std::setw(15) << o.first << GAGA_COLOR_GREYBOLD
+				       << " ❯ " << GAGA_COLOR_NORMAL << std::setw(15) << o.second;
+				std::cout << tableCenteredText(
+				    l, output.str(), GAGA_COLOR_GREENBOLD GAGA_COLOR_GREYBOLD GAGA_COLOR_NORMAL);
 			}
 		}
 		std::cout << tableFooter(l);
@@ -1298,14 +1344,15 @@ template <typename DNA> class GA {
 
 	void printIndividualStats(const Individual<DNA> &ind) {
 		std::ostringstream output;
-		output << GREYBOLD << "[" << YELLOW << procId << GREYBOLD << "]-▶ " << NORMAL;
+		output << GAGA_COLOR_GREYBOLD << "[" << GAGA_COLOR_YELLOW << procId
+		       << GAGA_COLOR_GREYBOLD << "]-▶ " << GAGA_COLOR_NORMAL;
 		for (const auto &o : ind.fitnesses)
-			output << " " << o.first << ": " << BLUEBOLD << std::setw(12) << o.second << NORMAL
-			       << GREYBOLD << " |" << NORMAL;
-		output << " 🕝 : " << BLUE << ind.evalTime << "s" << NORMAL;
+			output << " " << o.first << ": " << GAGA_COLOR_BLUEBOLD << std::setw(12) << o.second
+			       << GAGA_COLOR_NORMAL << GAGA_COLOR_GREYBOLD << " |" << GAGA_COLOR_NORMAL;
+		output << " 🕝 : " << GAGA_COLOR_BLUE << ind.evalTime << "s" << GAGA_COLOR_NORMAL;
 		for (const auto &o : ind.stats) output << " ; " << o.first << ": " << o.second;
 		if (ind.wasAlreadyEvaluated)
-			output << GREYBOLD << " | (already evaluated)\n" << NORMAL;
+			output << GAGA_COLOR_GREYBOLD << " | (already evaluated)\n" << GAGA_COLOR_NORMAL;
 		else
 			output << "\n";
 		if ((!novelty && verbosity >= 2) || verbosity >= 3) output << ind.infos << std::endl;
@@ -1331,9 +1378,9 @@ template <typename DNA> class GA {
 
 	std::string tableSeparation(unsigned int l) {
 		std::ostringstream output;
-		output << "|" << GREYBOLD;
+		output << "|" << GAGA_COLOR_GREYBOLD;
 		for (auto i = 0u; i < l; ++i) output << "-";
-		output << NORMAL << "|\n";
+		output << GAGA_COLOR_NORMAL << "|\n";
 		return output.str();
 	}
 
