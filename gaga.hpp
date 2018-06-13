@@ -540,6 +540,7 @@ template <typename DNA, typename footprint_t = doubleMat> class GA {
 			// and we dejsonize !
 			auto o = json::parse(popChar);
 			population = Ind_t::loadPopFromJSON(o);  // welcome bros!
+			delete[] popChar;
 			if (verbosity >= 3) {
 				std::ostringstream buf;
 				buf << endl
@@ -570,7 +571,7 @@ template <typename DNA, typename footprint_t = doubleMat> class GA {
 				auto o = json::parse(popChar);
 				vector<Ind_t> batch = Ind_t::loadPopFromJSON(o);
 				population.insert(population.end(), batch.begin(), batch.end());
-				delete popChar;
+				delete[] popChar;
 				if (verbosity >= 3) {
 					cout << endl
 					     << "Proc " << procId << " : reception of " << batch.size()
@@ -1443,7 +1444,7 @@ template <typename DNA, typename footprint_t = doubleMat> class GA {
 			auto elites = getElites(objectives, n, p);
 			std::stringstream baseName;
 			baseName << folder << "/gen" << currentGeneration;
-			mkdir(baseName.str().c_str(), 0777);
+			mkd(baseName.str().c_str());
 			if (verbosity >= 3) {
 				cerr << "created directory " << baseName.str() << endl;
 			}
@@ -1474,7 +1475,7 @@ template <typename DNA, typename footprint_t = doubleMat> class GA {
 		auto pfront = getParetoFront(pop);
 		std::stringstream baseName;
 		baseName << folder << "/gen" << currentGeneration;
-		mkdir(baseName.str().c_str(), 0777);
+		mkd(baseName.str().c_str());
 		if (verbosity >= 3) {
 			std::cout << "created directory " << baseName.str() << std::endl;
 		}
@@ -1629,27 +1630,35 @@ template <typename DNA, typename footprint_t = doubleMat> class GA {
 	}
 
  protected:
-	int mkpath(char *file_path, mode_t mode) {
+	int mkd(const char *p) {
+#ifdef _WIN32
+		return _mkdir(p);
+#else
+		return mkdir(p, 0777);
+#endif
+	}
+
+	void mkPath(char *file_path) {
 		assert(file_path && *file_path);
 		char *p;
 		for (p = strchr(file_path + 1, '/'); p; p = strchr(p + 1, '/')) {
 			*p = '\0';
-			if (mkdir(file_path, mode) == -1) {
+			if (mkd(file_path) == -1) {
 				if (errno != EEXIST) {
 					*p = '/';
-					return -1;
+					return;
 				}
 			}
 			*p = '/';
 		}
-		return 0;
 	}
+
 	void createFolder(string baseFolder) {
 		if (baseFolder.back() != '/') baseFolder += "/";
 		struct stat sb;
 		char bFChar[500];
 		strncpy(bFChar, baseFolder.c_str(), 500);
-		mkpath(bFChar, 0777);
+		mkPath(bFChar);
 		auto now = system_clock::now();
 		time_t now_c = system_clock::to_time_t(now);
 		struct tm *parts = localtime(&now_c);
@@ -1665,7 +1674,7 @@ template <typename DNA, typename footprint_t = doubleMat> class GA {
 			cpt++;
 		} while (stat(ftot.str().c_str(), &sb) == 0 && S_ISDIR(sb.st_mode));
 		folder = ftot.str();
-		mkdir(folder.c_str(), 0777);
+		mkd(folder.c_str());
 	}
 
  public:
@@ -1693,7 +1702,7 @@ template <typename DNA, typename footprint_t = doubleMat> class GA {
 		o["generation"] = currentGeneration;
 		std::stringstream baseName;
 		baseName << folder << "/gen" << currentGeneration;
-		mkdir(baseName.str().c_str(), 0777);
+		mkd(baseName.str().c_str());
 		std::stringstream fileName;
 		fileName << baseName.str() << "/pop" << currentGeneration << ".pop";
 		std::ofstream file;
@@ -1706,7 +1715,7 @@ template <typename DNA, typename footprint_t = doubleMat> class GA {
 		o["evaluator"] = evaluatorName;
 		std::stringstream baseName;
 		baseName << folder << "/gen" << currentGeneration;
-		mkdir(baseName.str().c_str(), 0777);
+		mkd(baseName.str().c_str());
 		std::stringstream fileName;
 		fileName << baseName.str() << "/archive" << currentGeneration << ".pop";
 		std::ofstream file;
