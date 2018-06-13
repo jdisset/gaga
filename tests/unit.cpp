@@ -10,9 +10,10 @@ template <typename T> void initGA() {
 	ga.setVerbosity(0);
 	ga.setMutationProba(0.7);
 	ga.setCrossoverProba(0.3);
-	ga.setEvaluator([](auto &i) { i.fitnesses["value"] = i.dna.value; });
+	ga.setEvaluator([](auto &i, int) { i.fitnesses["value"] = i.dna.value; });
 	REQUIRE((ga.population.size() == 0));
 	ga.setPopSize(200);
+	ga.setNbThreads(10);
 	ga.initPopulation([]() { return T::random(); });
 	ga.step(1);
 	int initialBest = 0;
@@ -35,7 +36,8 @@ void helpersMethods() {
 	const int N = 50;
 	GAGA::GA<IntDNA> ga(0, nullptr);
 	ga.setVerbosity(0);
-	ga.setEvaluator([](auto &i) {
+	ga.setNbThreads(10);
+	ga.setEvaluator([](auto &i, int) {
 		i.fitnesses["value"] = i.dna.value;
 		i.fitnesses["other"] = N - i.dna.value;
 	});
@@ -103,8 +105,10 @@ template <typename T> void GRNGA() {
 	GAGA::GA<T> ga(0, nullptr);
 	size_t popsize = 100;
 	ga.setVerbosity(0);
-	ga.setEvaluator(
-	    [](auto &i) { i.fitnesses["length"] = i.dna.getProteinSize(ProteinType::regul); });
+	ga.setNbThreads(10);
+	ga.setEvaluator([](auto &i, int) {
+		i.fitnesses["length"] = i.dna.getProteinSize(ProteinType::regul);
+	});
 	REQUIRE((ga.population.size() == 0));
 	ga.setPopSize(popsize);
 	vector<GAGA::Individual<T>> pop;
