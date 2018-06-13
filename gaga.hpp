@@ -21,9 +21,8 @@
  *       TO ENABLE PARALLELISATION
  * *************************************/
 // before including this file,
-// #define OMP if you want OpenMP parallelisation
-// #define CLUSTER if you want MPI parralelisation
-#ifdef CLUSTER
+// #define GAGA_MPI_CLUSTER if you want MPI parralelisation
+#ifdef GAGA_MPI_CLUSTER
 #include <mpi.h>
 #include <cstring>
 #endif
@@ -366,7 +365,7 @@ template <typename DNA> class GA {
 	 ********************************************************************************/
 	GA(int ac, char **av) : argc(ac), argv(av) {
 		setSelectionMethod(selecMethod);
-#ifdef CLUSTER
+#ifdef GAGA_MPI_CLUSTER
 		MPI_Init(&argc, &argv);
 		MPI_Comm_size(MPI_COMM_WORLD, &nbProcs);
 		MPI_Comm_rank(MPI_COMM_WORLD, &procId);
@@ -383,7 +382,7 @@ template <typename DNA> class GA {
 	}
 
 	~GA() {
-#ifdef CLUSTER
+#ifdef GAGA_MPI_CLUSTER
 		MPI_Finalize();
 #endif
 	}
@@ -426,7 +425,7 @@ template <typename DNA> class GA {
 	void subPrint(std::ostringstream &output) { output << std::endl; }
 
 	void evaluate() {
-#ifdef CLUSTER
+#ifdef GAGA_MPI_CLUSTER
 		MPI_distributePopulation();
 #endif
 
@@ -454,7 +453,7 @@ template <typename DNA> class GA {
 
 		for (auto &f : futures) f.get();
 
-#ifdef CLUSTER
+#ifdef GAGA_MPI_CLUSTER
 		MPI_receivePopulation();
 #endif
 	}
@@ -504,7 +503,7 @@ template <typename DNA> class GA {
 	}
 
 // MPI specifics
-#ifdef CLUSTER
+#ifdef GAGA_MPI_CLUSTER
 	void MPI_distributePopulation() {
 		if (procId == 0) {
 			// if we're in the master process, we send b(i)atches to the others.
@@ -1214,7 +1213,7 @@ template <typename DNA> class GA {
 			std::cout << "  ▹ speciation is " << GAGA_COLOR_RED << "disabled"
 			          << GAGA_COLOR_NORMAL << std::endl;
 		}
-#ifdef CLUSTER
+#ifdef GAGA_MPI_CLUSTER
 		std::cout << "  ▹ MPI parallelisation is " << GAGA_COLOR_GREEN << "enabled"
 		          << GAGA_COLOR_NORMAL << std::endl;
 #else
