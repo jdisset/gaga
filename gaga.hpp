@@ -27,9 +27,6 @@
 #include <mpi.h>
 #include <cstring>
 #endif
-#ifdef OMP
-#include <omp.h>
-#endif
 
 #include <assert.h>
 #include <sys/stat.h>
@@ -48,6 +45,7 @@
 #include <unordered_set>
 #include <utility>
 #include <vector>
+#include "include/cxxpool.hpp"
 #include "include/json.hpp"
 
 #define GAGA_COLOR_PURPLE "\033[35m"
@@ -221,6 +219,10 @@ template <typename DNA> class GA {
 	const unsigned int MAX_SPECIATION_TRIES = 100;
 	vector<double> speciationThresholds;  // spec thresholds per specie
 
+	// thread pool
+	unsigned int nbThreads = 1;
+	cxxpool::thread_pool tp{nbThreads};
+
 	/********************************************************************************
 	 *                                 SETTERS
 	 ********************************************************************************/
@@ -241,6 +243,14 @@ template <typename DNA> class GA {
 	void setPopSaveInterval(unsigned int n) { savePopInterval = n; }
 	void setGenSaveInterval(unsigned int n) { saveGenInterval = n; }
 	void setSaveFolder(string s) { folder = s; }
+	void setNbThreads(unsigned int n) {
+		if (n >= nbThreads)
+			tp.add_threads(n - nbThreads);
+		else {
+			std::cerr << "cannot remove threads from thread pool" << std::endl;
+		}
+		nbThreads = n;
+	}
 	void setCrossoverProba(double p) {
 		crossoverProba = p <= 1.0 ? (p >= 0.0 ? p : 0.0) : 1.0;
 	}
@@ -419,32 +429,31 @@ template <typename DNA> class GA {
 #ifdef CLUSTER
 		MPI_distributePopulation();
 #endif
-#ifdef OMP
-#pragma omp parallel for schedule(dynamic, 1)
-#endif
+
+		std::vector<std::future<void>> futures;
+		futures.reserve(population.size());
 		for (size_t i = 0; i < population.size(); ++i) {
-			printLn(3, "Considering evaluation of ind ", i);
-			if (evaluateAllIndividuals || !population[i].evaluated) {
-				printLn(3, "Going to evaluate ind ", i);
-				auto t0 = high_resolution_clock::now();
-				population[i].dna.reset();
-#ifdef OMP
-				evaluator(population[i], omp_get_thread_num());
-#else
-				evaluator(population[i], 0);
-#endif
-				auto t1 = high_resolution_clock::now();
-				population[i].evaluated = true;
-				printLn(3, "Ind ", i, " evaluated");
-				double indTime = std::chrono::duration<double>(t1 - t0).count();
-				population[i].evalTime = indTime;
-				population[i].wasAlreadyEvaluated = false;
-			} else {
-				population[i].evalTime = 0.0;
-				population[i].wasAlreadyEvaluated = true;
-			}
-			if (verbosity >= 2) printIndividualStats(population[i]);
+			futures.push_back(tp.push([&, i]() {
+				if (evaluateAllIndividuals || !population[i].evaluated) {
+					printLn(3, "Going to evaluate ind ");
+					auto t0 = high_resolution_clock::now();
+					population[i].dna.reset();
+					evaluator(population[i], 0);
+					auto t1 = high_resolution_clock::now();
+					population[i].evaluated = true;
+					double indTime = std::chrono::duration<double>(t1 - t0).count();
+					population[i].evalTime = indTime;
+					population[i].wasAlreadyEvaluated = false;
+				} else {
+					population[i].evalTime = 0.0;
+					population[i].wasAlreadyEvaluated = true;
+				}
+				if (verbosity >= 2) printIndividualStats(population[i]);
+			}));
 		}
+
+		for (auto &f : futures) f.get();
+
 #ifdef CLUSTER
 		MPI_receivePopulation();
 #endif
@@ -581,8 +590,8 @@ template <typename DNA> class GA {
 	// - regroupement en nouvelles espèces en utilisant la distance aux représentants
 	// (création d'une nouvelle espèce si distance < speciationThreshold)
 	// - on supprime les espèces de taille < minSpecieSize
-	// - on rajoute des individus en les faisant muter depuis une espèce aléatoire (nouvelle
-	// espèce à chaque tirage) et en les rajoutants à cette espèce
+	// - on rajoute des individus en les faisant muter depuis une espèce aléatoire
+	// (nouvelle espèce à chaque tirage) et en les rajoutants à cerre espèce
 	// - c'est reparti :D
 
 	void speciationNextGen() {
@@ -664,7 +673,7 @@ template <typename DNA> class GA {
 				                         static_cast<double>(objectivesList.size())) *
 				                        adjustedFitnessSum[i][o] / totalAdjustedFitness[o]);
 
-				nOffsprings = std::max(static_cast<int>(nOffsprings), 1);
+				nOffsprings = std::max(static_cast<size_t>(nOffsprings), 1ul);
 				nextGen.reserve(nextGen.size() + nOffsprings);
 				auto specieOffsprings = produceNOffsprings(nOffsprings, s, nbElites);
 				nextGen.insert(nextGen.end(), std::make_move_iterator(specieOffsprings.begin()),
@@ -705,11 +714,14 @@ template <typename DNA> class GA {
 			double closestDist = std::numeric_limits<double>::max();
 			bool foundSpecie = false;
 			vector<double> distances(nextLeaders.size());
-#ifdef OMP
-#pragma omp parallel for
-#endif
+
+			std::vector<std::future<void>> futures;
 			for (size_t l = 0; l < nextLeaders.size(); ++l)
-				distances[l] = indDistanceFunction(nextLeaders[l], i);
+				futures.push_back(tp.push([=, &distances, &nextLeaders]() {
+					distances[l] = indDistanceFunction(nextLeaders[l], i);
+				}));
+			for (auto &f : futures) f.get();
+
 			for (size_t d = 0; d < distances.size(); ++d) {
 				if (distances[d] < closestDist && distances[d] < speciationThresholds[d]) {
 					closestDist = distances[d];
@@ -772,27 +784,29 @@ template <typename DNA> class GA {
 			}
 		}
 
-// replacing all "deleted" individuals and putting them in existing species
-#ifdef OMP
-#pragma omp parallel for
-#endif
+		std::vector<std::future<void>> futures;
+		// replacing all "deleted" individuals and putting them in existing species
 		for (size_t tr = 0; tr < toReplace.size(); ++tr) {
-			auto &i = toReplace[tr];
-			// we choose one random specie and mutate individuals until the new ind can fit
-			i->evaluated = false;
-			auto selection = getSelectionMethod<vector<Iptr>>();
-			std::uniform_int_distribution<size_t> d(0, nextLeaders.size() - 1);
-			size_t leaderID = d(globalRand);
-			unsigned int c = 0;
-			do {
-				if (c++ > MAX_SPECIATION_TRIES)
-					throw std::runtime_error("Too many tries. Speciation thresholds too low.");
-				// /!\ Selection cannot work properly here, as lots of new individuals haven't
-				// been evaluated yet.
-				i->dna = selection(species[leaderID])->dna;
-			} while (indDistanceFunction(*i, nextLeaders[leaderID]) >
-			         speciationThresholds[leaderID]);
+			futures.push_back(tp.push([&, tr]() {
+				auto &i = toReplace[tr];
+				// we choose one random specie and mutate
+				// individuals until the new ind can fit
+				i->evaluated = false;
+				auto selection = getSelectionMethod<vector<Iptr>>();
+				std::uniform_int_distribution<size_t> d(0, nextLeaders.size() - 1);
+				size_t leaderID = d(globalRand);
+				unsigned int c = 0;
+				do {
+					if (c++ > MAX_SPECIATION_TRIES)
+						throw std::runtime_error("Too many tries. Speciation thresholds too low.");
+					// /!\ Selection cannot work properly here, as lots of new individuals haven't
+					// been evaluated yet.
+					i->dna = selection(species[leaderID])->dna;
+				} while (indDistanceFunction(*i, nextLeaders[leaderID]) >
+				         speciationThresholds[leaderID]);
+			}));
 		}
+		for (auto &f : futures) f.get();
 
 		if (verbosity >= 3) cerr << "Done. " << std::endl;
 		// adjusting speciation Thresholds
@@ -848,23 +862,30 @@ template <typename DNA> class GA {
 		size_t nCross = crossoverProba * (n - s);
 		size_t nMut = mutationProba * (n - s);
 		nextGen.reserve(nCross + nMut);
-#ifdef OMP
-#pragma omp parallel for
-#endif
+		std::mutex nextGenMutex;
+
+		std::vector<std::future<void>> futures;
 		for (size_t i = s; i < nCross + s; ++i) {
-			auto *p0 = selection(popu);
-			auto *p1 = selection(popu);
-			Individual<DNA> offspring(p0->dna.crossover(p1->dna));
-			nextGen.push_back(offspring);
+			futures.push_back(tp.push([&]() {
+				auto *p0 = selection(popu);
+				auto *p1 = selection(popu);
+				Individual<DNA> offspring(p0->dna.crossover(p1->dna));
+				std::lock_guard<std::mutex> thread_lock(nextGenMutex);
+				nextGen.push_back(offspring);
+			}));
 		}
-#ifdef OMP
-#pragma omp parallel for
-#endif
+
 		for (size_t i = nCross + s; i < nMut + nCross + s; ++i) {
-			nextGen.push_back(*selection(popu));
-			nextGen.back().dna.mutate();
-			nextGen.back().evaluated = false;
+			futures.push_back(tp.push([&]() {
+				auto ind = *selection(popu);
+				ind.dna.mutate();
+				ind.evaluated = false;
+				std::lock_guard<std::mutex> thread_lock(nextGenMutex);
+				nextGen.push_back(ind);
+			}));
 		}
+
+		for (auto &f : futures) f.get();
 
 		while (nextGen.size() < n) nextGen.push_back(*selection(popu));
 
@@ -1103,7 +1124,7 @@ template <typename DNA> class GA {
 			ind.fitnesses["novelty"] = avgD;
 		}
 
-		archive.erase(archive.begin() + savedArchiveSize, archive.end());
+		archive.erase(archive.begin() + static_cast<long>(savedArchiveSize), archive.end());
 		archive.insert(std::end(archive), std::begin(toBeAdded), std::end(toBeAdded));
 		if (verbosity >= 2) {
 			std::stringstream output;
