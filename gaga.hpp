@@ -29,7 +29,7 @@
 
 #include <assert.h>
 #include <sys/stat.h>
-#include <sys/types.h>
+//#include <sys/types.h>
 #include <algorithm>
 #include <chrono>
 #include <cstring>
@@ -192,8 +192,8 @@ template <typename DNA, typename footprint_t = doubleMat> class GA {
 	unsigned int saveGenInterval = 1;     // interval between 2 elites/pareto saves
 	string folder = "../evos/";           // where to save the results
 	string evaluatorName;                 // name of the given evaluator func
-	double crossoverProba = 0.2;          // crossover probability
-	double mutationProba = 0.5;           // mutation probablility
+	double crossoverRate = 0.2;           // crossover probability
+	double mutationRate = 0.5;            // mutation probablility
 	bool evaluateAllIndividuals = false;  // force evaluation of every individual
 	bool doSaveParetoFront = false;       // save the pareto front
 	bool doSaveGenStats = true;           // save generations stats to csv file
@@ -254,14 +254,13 @@ template <typename DNA, typename footprint_t = doubleMat> class GA {
 		}
 		nbThreads = n;
 	}
-	void setCrossoverProba(double p) {
-		crossoverProba = p <= 1.0 ? (p >= 0.0 ? p : 0.0) : 1.0;
+	void setCrossoverRate(double p) {
+		crossoverRate = p <= 1.0 ? (p >= 0.0 ? p : 0.0) : 1.0;
 	}
-	double getCrossoverProba() { return crossoverProba; }
-	void setMutationProba(double p) {
-		mutationProba = p <= 1.0 ? (p >= 0.0 ? p : 0.0) : 1.0;
-	}
-	double getMutationProba() { return mutationProba; }
+	double getCrossoverRate() { return crossoverRate; }
+	void setMutationRate(double p) { mutationRate = p <= 1.0 ? (p >= 0.0 ? p : 0.0) : 1.0; }
+	int getVerbosity() { return verbosity; }
+	double getMutationRate() { return mutationRate; }
 	void setEvaluator(std::function<void(Ind_t &, int)> e,
 	                  std::string ename = "anonymousEvaluator") {
 		evaluator = e;
@@ -276,6 +275,14 @@ template <typename DNA, typename footprint_t = doubleMat> class GA {
 		newGenerationFunction = f;
 	}  // called before evaluating the current population
 
+	void setEvaluateFunction(std::function<void(void)> f) {
+		evaluate = f;
+	}  // evaluation of the whole population
+
+	void setNextGenerationFunction(std::function<void(void)> f) {
+		nextGeneration = f;
+	}  // evaluation and next generation
+
 	void setIsBetterMethod(std::function<bool(double, double)> f) { isBetter = f; }
 	void setSelectionMethod(const SelectionMethod &sm) { selecMethod = sm; }
 
@@ -289,6 +296,7 @@ template <typename DNA, typename footprint_t = doubleMat> class GA {
 		}
 	}
 
+	bool getEvaluateAllIndividuals() { return evaluateAllIndividuals; }
 	void setEvaluateAllIndividuals(bool m) { evaluateAllIndividuals = m; }
 	void setSaveParetoFront(bool m) { doSaveParetoFront = m; }
 	void setSaveGenStats(bool m) { doSaveGenStats = m; }
@@ -360,6 +368,7 @@ template <typename DNA, typename footprint_t = doubleMat> class GA {
 	std::function<void(Ind_t &, int)> evaluator;
 	std::function<void(void)> newGenerationFunction = []() {};
 	std::function<void(void)> nextGeneration = [this]() { classicNextGen(); };
+	std::function<void(void)> evaluate = [this]() { defaultEvaluate(); };
 	std::function<bool(double, double)> isBetter = [](double a, double b) { return a > b; };
 
 	// returns a reference (transforms pointer into reference)
@@ -433,7 +442,8 @@ template <typename DNA, typename footprint_t = doubleMat> class GA {
 	}
 	void subPrint(std::ostringstream &output) { output << std::endl; }
 
-	void evaluate() {
+	void defaultEvaluate() {  // uses evaluator
+		if (!evaluator) throw std::invalid_argument("No evaluator specified");
 #ifdef GAGA_MPI_CLUSTER
 		MPI_distributePopulation();
 #endif
@@ -469,7 +479,6 @@ template <typename DNA, typename footprint_t = doubleMat> class GA {
 
 	// "Vroum vroum"
 	void step(int nbGeneration = 1) {
-		if (!evaluator) throw std::invalid_argument("No evaluator specified");
 		if (currentGeneration == 0 && procId == 0) {
 			createFolder(folder);
 			if (verbosity >= 1) printStart();
@@ -478,7 +487,7 @@ template <typename DNA, typename footprint_t = doubleMat> class GA {
 			newGenerationFunction();
 			auto tg0 = high_resolution_clock::now();
 			nextGeneration();
-			if (procId == 0) {
+			if (procId == 0) {  // stats
 				assert(lastGen.size());
 				if (population.size() != popSize)
 					throw std::invalid_argument("Population doesn't match the popSize param");
@@ -868,8 +877,8 @@ template <typename DNA, typename footprint_t = doubleMat> class GA {
 
 		auto s = nextGen.size();
 
-		size_t nCross = crossoverProba * (n - s);
-		size_t nMut = mutationProba * (n - s);
+		size_t nCross = crossoverRate * (n - s);
+		size_t nMut = mutationRate * (n - s);
 		nextGen.reserve(nCross + nMut);
 		std::mutex nextGenMutex;
 
@@ -1024,7 +1033,6 @@ template <typename DNA, typename footprint_t = doubleMat> class GA {
 		return elites;
 	}
 
- protected:
 	/*********************************************************************************
 	 *                          NOVELTY RELATED METHODS
 	 ********************************************************************************/
@@ -1185,9 +1193,9 @@ template <typename DNA, typename footprint_t = doubleMat> class GA {
 		          << tournamentSize << GAGA_COLOR_NORMAL << std::endl;
 		std::cout << "  ▹ selection = " << GAGA_COLOR_BLUE
 		          << selectMethodToString(selecMethod) << GAGA_COLOR_NORMAL << std::endl;
-		std::cout << "  ▹ mutation rate = " << GAGA_COLOR_BLUE << mutationProba
+		std::cout << "  ▹ mutation rate = " << GAGA_COLOR_BLUE << mutationRate
 		          << GAGA_COLOR_NORMAL << std::endl;
-		std::cout << "  ▹ crossover rate = " << GAGA_COLOR_BLUE << crossoverProba
+		std::cout << "  ▹ crossover rate = " << GAGA_COLOR_BLUE << crossoverRate
 		          << GAGA_COLOR_NORMAL << std::endl;
 		std::cout << "  ▹ writing results in " << GAGA_COLOR_BLUE << folder
 		          << GAGA_COLOR_NORMAL << std::endl;
@@ -1672,7 +1680,7 @@ template <typename DNA, typename footprint_t = doubleMat> class GA {
 			ftot.str("");
 			ftot << baseFolder << fname.str() << cpt;
 			cpt++;
-		} while (stat(ftot.str().c_str(), &sb) == 0 && S_ISDIR(sb.st_mode));
+		} while (stat(ftot.str().c_str(), &sb) == 0);  // && S_ISDIR(sb.st_mode));
 		folder = ftot.str();
 		mkd(folder.c_str());
 	}
