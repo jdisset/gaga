@@ -1,5 +1,5 @@
 // Gaga: lightweight simple genetic algorithm library
-// Copyright (c) Jean Disset 2016, All rights reserved.
+// Copyright (c) Jean Disset 2018, All rights reserved.
 
 // This library is free software; you can redistribute it and/or
 // modify it under the terms of the GNU Lesser General Public
@@ -16,16 +16,6 @@
 
 #ifndef GAMULTI_HPP
 #define GAMULTI_HPP
-
-/****************************************
- *       TO ENABLE PARALLELISATION
- * *************************************/
-// before including this file,
-// #define GAGA_MPI_CLUSTER if you want MPI parralelisation
-#ifdef GAGA_MPI_CLUSTER
-#include <mpi.h>
-#include <cstring>
-#endif
 
 #include <assert.h>
 #include <sys/stat.h>
@@ -86,11 +76,6 @@ using std::chrono::system_clock;
 // 1 - the Individual class template : an individual's generic representation, with its
 // dna, fitnesses and behavior footprints (for novelty)
 // 2 - the main GA class template
-
-// About parallelisation :
-// before including this file,
-// #define OMP if you want OpenMP parallelisation
-// #define CLUSTER if you want MPI parallelisation
 
 /*****************************************************************************
  *                         INDIVIDUAL CLASS
@@ -271,6 +256,11 @@ template <typename DNA, typename footprint_t = doubleMat> class GA {
 		}
 	}
 
+	void setMutateMethod(std::function<void(DNA_t &)> m) { mutate = m; }
+	void setCrossoverMethod(std::function<DNA_t(const DNA_t &, const DNA_t &)> m) {
+		crossover = m;
+	}
+
 	void setNewGenerationFunction(std::function<void(void)> f) {
 		newGenerationFunction = f;
 	}  // called before evaluating the current population
@@ -357,15 +347,28 @@ template <typename DNA, typename footprint_t = doubleMat> class GA {
 
 	size_t currentGeneration = 0;
 	bool customInit = false;
-	// openmp/mpi stuff
 	int procId = 0;
 	int nbProcs = 1;
-	int argc = 1;
-	char **argv = nullptr;
 
 	std::vector<std::map<std::string, std::map<std::string, double>>> genStats;
 
+	template <class D> auto defaultMutate(D &d) -> decltype(d.mutate()) { d.mutate(); }
+	void defaultMutate(...) { printLn(2, "WARNING: no mutate method specified"); }
+
+	template <class D>
+	auto defaultCrossover(const D &d1, const D &d2) -> decltype(d1.crossover(d2)) {
+		return d1.crossover(d2);
+	}
+	DNA_t defaultCrossover(const DNA_t &d1, ...) {
+		printLn(2, "WARNING: no crossover method specified");
+		return d1;
+	}
+
 	std::function<void(Ind_t &, int)> evaluator;
+	std::function<DNA_t(const DNA_t &, const DNA_t &)> crossover =
+	    [](const DNA_t &d1, const DNA_t &d2) { return defaultCrossover(d1, d2); };
+	std::function<void(DNA_t &)> mutate = [](DNA_t &d) { defaultMutate(d); };
+
 	std::function<void(void)> newGenerationFunction = []() {};
 	std::function<void(void)> nextGeneration = [this]() { classicNextGen(); };
 	std::function<void(void)> evaluate = [this]() { defaultEvaluate(); };
@@ -381,29 +384,7 @@ template <typename DNA, typename footprint_t = doubleMat> class GA {
 	/*********************************************************************************
 	 *                              CONSTRUCTOR
 	 ********************************************************************************/
-	GA(int ac, char **av) : argc(ac), argv(av) {
-		setSelectionMethod(selecMethod);
-#ifdef GAGA_MPI_CLUSTER
-		MPI_Init(&argc, &argv);
-		MPI_Comm_size(MPI_COMM_WORLD, &nbProcs);
-		MPI_Comm_rank(MPI_COMM_WORLD, &procId);
-		if (procId == 0) {
-			if (verbosity >= 3) {
-				std::cout << "   -------------------" << endl;
-				std::cout << GAGA_COLOR_CYAN << " MPI STARTED WITH " << GAGA_COLOR_NORMAL
-				          << nbProcs << GAGA_COLOR_CYAN << " PROCS " << GAGA_COLOR_NORMAL << endl;
-				std::cout << "   -------------------" << endl;
-				std::cout << "Initialising population in master process" << endl;
-			}
-		}
-#endif
-	}
-
-	~GA() {
-#ifdef GAGA_MPI_CLUSTER
-		MPI_Finalize();
-#endif
-	}
+	GA() {}
 
 	/*********************************************************************************
 	 *                          START THE BOUZIN
@@ -444,10 +425,6 @@ template <typename DNA, typename footprint_t = doubleMat> class GA {
 
 	void defaultEvaluate() {  // uses evaluator
 		if (!evaluator) throw std::invalid_argument("No evaluator specified");
-#ifdef GAGA_MPI_CLUSTER
-		MPI_distributePopulation();
-#endif
-
 		std::vector<std::future<void>> futures;
 		futures.reserve(population.size());
 		for (size_t i = 0; i < population.size(); ++i) {
@@ -469,12 +446,7 @@ template <typename DNA, typename footprint_t = doubleMat> class GA {
 				if (verbosity >= 2) printIndividualStats(population[i]);
 			}));
 		}
-
 		for (auto &f : futures) f.get();
-
-#ifdef GAGA_MPI_CLUSTER
-		MPI_receivePopulation();
-#endif
 	}
 
 	// "Vroum vroum"
@@ -519,77 +491,6 @@ template <typename DNA, typename footprint_t = doubleMat> class GA {
 			++currentGeneration;
 		}
 	}
-
-// MPI specifics
-#ifdef GAGA_MPI_CLUSTER
-	void MPI_distributePopulation() {
-		if (procId == 0) {
-			// if we're in the master process, we send b(i)atches to the others.
-			// master will have the remaining
-			size_t batchSize = population.size() / nbProcs;
-			for (size_t dest = 1; dest < (size_t)nbProcs; ++dest) {
-				vector<Ind_t> batch;
-				for (size_t ind = 0; ind < batchSize; ++ind) {
-					batch.push_back(population.back());
-					population.pop_back();
-				}
-				string batchStr = Ind_t::popToJSON(batch).dump();
-				std::vector<char> tmp(batchStr.begin(), batchStr.end());
-				tmp.push_back('\0');
-				MPI_Send(tmp.data(), tmp.size(), MPI_BYTE, dest, 0, MPI_COMM_WORLD);
-			}
-		} else {
-			// we're in a slave process, we welcome our local population !
-			int strLength;
-			MPI_Status status;
-			MPI_Probe(0, 0, MPI_COMM_WORLD, &status);  // we want to know its size
-			MPI_Get_count(&status, MPI_CHAR, &strLength);
-			char *popChar = new char[strLength + 1];
-			MPI_Recv(popChar, strLength, MPI_BYTE, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-			// and we dejsonize !
-			auto o = json::parse(popChar);
-			population = Ind_t::loadPopFromJSON(o);  // welcome bros!
-			delete[] popChar;
-			if (verbosity >= 3) {
-				std::ostringstream buf;
-				buf << endl
-				    << "Proc " << GAGA_COLOR_PURPLE << procId << GAGA_COLOR_NORMAL
-				    << " : reception of " << population.size() << " new individuals !" << endl;
-				cout << buf.str();
-			}
-		}
-	}
-
-	void MPI_receivePopulation() {
-		if (procId != 0) {  // if slave process we send our population to our mighty leader
-			string batchStr = Ind_t::popToJSON(population).dump();
-			std::vector<char> tmp(batchStr.begin(), batchStr.end());
-			tmp.push_back('\0');
-			MPI_Send(tmp.data(), tmp.size(), MPI_BYTE, 0, 0, MPI_COMM_WORLD);
-		} else {
-			// master process receives all other batches
-			for (size_t source = 1; source < (size_t)nbProcs; ++source) {
-				int strLength;
-				MPI_Status status;
-				MPI_Probe(source, 0, MPI_COMM_WORLD, &status);  // determining batch size
-				MPI_Get_count(&status, MPI_CHAR, &strLength);
-				char *popChar = new char[strLength + 1];
-				MPI_Recv(popChar, strLength + 1, MPI_BYTE, source, 0, MPI_COMM_WORLD,
-				         MPI_STATUS_IGNORE);
-				// and we dejsonize!
-				auto o = json::parse(popChar);
-				vector<Ind_t> batch = Ind_t::loadPopFromJSON(o);
-				population.insert(population.end(), batch.begin(), batch.end());
-				delete[] popChar;
-				if (verbosity >= 3) {
-					cout << endl
-					     << "Proc " << procId << " : reception of " << batch.size()
-					     << " treated individuals from proc " << source << endl;
-				}
-			}
-		}
-	}
-#endif
 	/*********************************************************************************
 	 *                            NEXT POP GETTING READY
 	 ********************************************************************************/
@@ -602,18 +503,18 @@ template <typename DNA, typename footprint_t = doubleMat> class GA {
 		if (verbosity >= 3) cerr << "Next generation ready" << endl;
 	}
 
-	// - evaluation de toute la pop, sans se soucier des espèces.
-	// - choix des nouveaux représentants parmis les espèces précédentes (clonage)
-	// - création d'une nouvelle population via selection/mutation/crossover
-	// intra-espece
-	// - regroupement en nouvelles espèces en utilisant la distance aux représentants
-	// (création d'une nouvelle espèce si distance < speciationThreshold)
-	// - on supprime les espèces de taille < minSpecieSize
-	// - on rajoute des individus en les faisant muter depuis une espèce aléatoire
-	// (nouvelle espèce à chaque tirage) et en les rajoutants à cerre espèce
-	// - c'est reparti :D
-
 	void speciationNextGen() {
+		// - evaluation de toute la pop, sans se soucier des espèces.
+		// - choix des nouveaux représentants parmis les espèces précédentes (clonage)
+		// - création d'une nouvelle population via selection/mutation/crossover
+		// intra-espece
+		// - regroupement en nouvelles espèces en utilisant la distance aux représentants
+		// (création d'une nouvelle espèce si distance < speciationThreshold)
+		// - on supprime les espèces de taille < minSpecieSize
+		// - on rajoute des individus en les faisant muter depuis une espèce aléatoire
+		// (nouvelle espèce à chaque tirage) et en les rajoutants à cerre espèce
+		// - c'est reparti :D
+
 		// TODO : for now it only works with maximization
 		// minimization would require a modification in the nOffsprings
 		// and in the worstFitness computations
@@ -710,9 +611,11 @@ template <typename DNA, typename footprint_t = doubleMat> class GA {
 			std::uniform_int_distribution<size_t> d(0, nextLeaders.size() - 1);
 			// we just add mutated leaders
 			auto offspring = nextLeaders[d(globalRand)];
-			offspring.dna.mutate();
+			mutate(offspring.dna);
 			offspring.evaluated = false;
 			population.push_back(offspring);
+			// log
+			mutationLog.push_back({{"generation":,"parent":,"child":}});
 		}
 		while (population.size() > popSize) {
 			population.erase(population.begin());
@@ -887,7 +790,7 @@ template <typename DNA, typename footprint_t = doubleMat> class GA {
 			futures.push_back(tp.push([&]() {
 				auto *p0 = selection(popu);
 				auto *p1 = selection(popu);
-				Ind_t offspring(p0->dna.crossover(p1->dna));
+				Ind_t offspring(crossover(p0->dna, p1->dna));
 				std::lock_guard<std::mutex> thread_lock(nextGenMutex);
 				nextGen.push_back(offspring);
 			}));
@@ -896,7 +799,7 @@ template <typename DNA, typename footprint_t = doubleMat> class GA {
 		for (size_t i = nCross + s; i < nMut + nCross + s; ++i) {
 			futures.push_back(tp.push([&]() {
 				auto ind = *selection(popu);
-				ind.dna.mutate();
+				mutate(ind.dna);
 				ind.evaluated = false;
 				std::lock_guard<std::mutex> thread_lock(nextGenMutex);
 				nextGen.push_back(ind);
@@ -1225,20 +1128,6 @@ template <typename DNA, typename footprint_t = doubleMat> class GA {
 			std::cout << "  ▹ speciation is " << GAGA_COLOR_RED << "disabled"
 			          << GAGA_COLOR_NORMAL << std::endl;
 		}
-#ifdef GAGA_MPI_CLUSTER
-		std::cout << "  ▹ MPI parallelisation is " << GAGA_COLOR_GREEN << "enabled"
-		          << GAGA_COLOR_NORMAL << std::endl;
-#else
-		std::cout << "  ▹ MPI parallelisation is " << GAGA_COLOR_RED << "disabled"
-		          << GAGA_COLOR_NORMAL << std::endl;
-#endif
-#ifdef OMP
-		std::cout << "  ▹ OpenMP parallelisation is " << GAGA_COLOR_GREEN << "enabled"
-		          << GAGA_COLOR_NORMAL << std::endl;
-#else
-		std::cout << "  ▹ OpenMP parallelisation is " << GAGA_COLOR_RED << "disabled"
-		          << GAGA_COLOR_NORMAL << std::endl;
-#endif
 		std::cout << GAGA_COLOR_GREY;
 		for (int i = 0; i < nbCol - 1; ++i) std::cout << "━";
 		std::cout << GAGA_COLOR_NORMAL << std::endl;

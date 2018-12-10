@@ -1,4 +1,5 @@
 build
+tmp
 evos
 .DS_STORE
 *.gch*
