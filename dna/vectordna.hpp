@@ -110,4 +110,3 @@ template <typename T> struct VectorDNA {
 	}
 };
 }  // namespace GAGA
-
