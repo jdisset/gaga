@@ -350,25 +350,34 @@ template <typename DNA, typename footprint_t = doubleMat> class GA {
 	int procId = 0;
 	int nbProcs = 1;
 
+	// genStats will be populated with some basic generation stats
 	std::vector<std::map<std::string, std::map<std::string, double>>> genStats;
 
+	// default mutate and crossover are taken from the DNA_t class, if they are defined.
 	template <class D> auto defaultMutate(D &d) -> decltype(d.mutate()) { d.mutate(); }
-	void defaultMutate(...) { printLn(2, "WARNING: no mutate method specified"); }
+	template <class D, class... SFINAE> D defaultMutate(const D &d, SFINAE...) {
+		printLn(2, "WARNING: no mutate method specified");
+		return d;
+	}
 
 	template <class D>
 	auto defaultCrossover(const D &d1, const D &d2) -> decltype(d1.crossover(d2)) {
 		return d1.crossover(d2);
 	}
-	DNA_t defaultCrossover(const DNA_t &d1, ...) {
+
+	template <class D, class... SFINAE> D defaultCrossover(const D &d1, SFINAE...) {
 		printLn(2, "WARNING: no crossover method specified");
 		return d1;
 	}
 
-	std::function<void(Ind_t &, int)> evaluator;
+	// crossover and mutate are 2 lambdas that call defaultMutate and defaultCrossover. It
+	// shouldn't be needed for most use cases, but for advanced usage and logging, the user
+	// can override these methods. Change at your own risks.
 	std::function<DNA_t(const DNA_t &, const DNA_t &)> crossover =
-	    [](const DNA_t &d1, const DNA_t &d2) { return defaultCrossover(d1, d2); };
-	std::function<void(DNA_t &)> mutate = [](DNA_t &d) { defaultMutate(d); };
+	    [this](const DNA_t &d1, const DNA_t &d2) { return defaultCrossover(d1, d2); };
+	std::function<void(DNA_t &)> mutate = [this](DNA_t &d) { defaultMutate(d); };
 
+	std::function<void(Ind_t &, int)> evaluator;
 	std::function<void(void)> newGenerationFunction = []() {};
 	std::function<void(void)> nextGeneration = [this]() { classicNextGen(); };
 	std::function<void(void)> evaluate = [this]() { defaultEvaluate(); };
@@ -614,8 +623,6 @@ template <typename DNA, typename footprint_t = doubleMat> class GA {
 			mutate(offspring.dna);
 			offspring.evaluated = false;
 			population.push_back(offspring);
-			// log
-			mutationLog.push_back({{"generation":,"parent":,"child":}});
 		}
 		while (population.size() > popSize) {
 			population.erase(population.begin());
