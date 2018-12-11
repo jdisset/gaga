@@ -58,11 +58,9 @@ namespace GAGA {
 using std::cerr;
 using std::cout;
 using std::endl;
-using std::map;
 using std::string;
 using std::unordered_map;
 using std::unordered_set;
-using std::vector;
 using doubleMat = std::vector<std::vector<double>>;  // footprints for novelty
 using json = nlohmann::json;
 using std::chrono::high_resolution_clock;
@@ -90,13 +88,21 @@ using std::chrono::system_clock;
 
 template <typename DNA, typename footprint_t = doubleMat> struct Individual {
 	DNA dna;
-	map<string, double> fitnesses;  // map {"fitnessCriterName" -> "fitnessValue"}
-	footprint_t footprint;          // individual's footprint for novelty computation
-	string infos;                   // custom infos, description, whatever...
+
+	std::map<string, double> fitnesses;  // std::map {"fitnessCriterName" -> "fitnessValue"}
+	footprint_t footprint;               // individual's footprint for novelty computation
 	bool evaluated = false;
 	bool wasAlreadyEvaluated = false;
 	double evalTime = 0.0;
-	map<string, double> stats;  // custom stats
+	std::pair<size_t, size_t> id{0u, 0u};  // gen id , ind id
+
+	string infos;  // custom infos, description, whatever... filled by user
+	std::map<string, double> stats;  // custom stats, filled by user
+	// ancestry & lineage
+	std::vector<std::pair<size_t, size_t>>
+	    parents;  // vector of {{ generation id, individual id }}
+	std::string inheritanceType =
+	    "exnihilo";  // inheritance type : mutation, crossover, copy, exnihilo
 
 	// Individual() {}
 	explicit Individual(const DNA &d) : dna(d) {}
@@ -110,6 +116,10 @@ template <typename DNA, typename footprint_t = doubleMat> struct Individual {
 		if (o.count("evaluated")) evaluated = o.at("evaluated");
 		if (o.count("alreadyEval")) wasAlreadyEvaluated = o.at("alreadyEval");
 		if (o.count("evalTime")) evalTime = o.at("evalTime");
+		if (o.count("stats")) stats = o.at("stats");
+		if (o.count("parents")) stats = o.at("parents");
+		if (o.count("inheritanceType")) stats = o.at("inheritanceType");
+		if (o.count("id")) id = o.at("id");
 	}
 
 	// Exports individual to json
@@ -122,10 +132,14 @@ template <typename DNA, typename footprint_t = doubleMat> struct Individual {
 		o["evaluated"] = evaluated;
 		o["alreadyEval"] = wasAlreadyEvaluated;
 		o["evalTime"] = evalTime;
+		o["stats"] = stats;
+		o["parents"] = parents;
+		o["inheritanceType"] = inheritanceType;
+		o["id"] = id;
 		return o;
 	}
 
-	// Exports a vector of individual to json
+	// Exports a std::vector of individual to json
 	static json popToJSON(const std::vector<Individual<DNA, footprint_t>> &p) {
 		json o;
 		json popArray;
@@ -134,7 +148,7 @@ template <typename DNA, typename footprint_t = doubleMat> struct Individual {
 		return o;
 	}
 
-	// Loads a vector of individual from json
+	// Loads a std::vector of individual from json
 	static std::vector<Individual<DNA, footprint_t>> loadPopFromJSON(const json &o) {
 		assert(o.count("population"));
 		std::vector<Individual<DNA, footprint_t>> res;
@@ -143,6 +157,16 @@ template <typename DNA, typename footprint_t = doubleMat> struct Individual {
 		return res;
 	}
 };
+
+template <typename DNA, typename f>
+void to_json(nlohmann::json &j, const Individual<DNA, f> &i) {
+	j = i.toJSON();
+}
+
+template <typename DNA, typename f>
+void from_json(const nlohmann::json &j, Individual<DNA, f> &i) {
+	i = Individual<DNA, f>(j);
+}
 
 /*********************************************************************************
  *                                 GA CLASS
@@ -204,7 +228,7 @@ template <typename DNA, typename footprint_t = doubleMat> class GA {
 	                     const Individual<DNA, footprint_t> &)>
 	    indDistanceFunction = [](const auto &, const auto &) { return 0.0; };
 	const unsigned int MAX_SPECIATION_TRIES = 100;
-	vector<double> speciationThresholds;  // spec thresholds per specie
+	std::vector<double> speciationThresholds;  // spec thresholds per specie
 
 	// thread pool
 	unsigned int nbThreads = 1;
@@ -293,8 +317,8 @@ template <typename DNA, typename footprint_t = doubleMat> class GA {
 	void setSaveIndStats(bool m) { doSaveIndStats = m; }
 
 	// main current and previous population containers
-	vector<Ind_t> population;
-	vector<Ind_t> lastGen;
+	std::vector<Ind_t> population;  // current population
+	std::vector<std::vector<Ind_t>> previousGenerations;
 
 	// for novelty:
 	void enableNovelty() { novelty = true; }
@@ -330,7 +354,7 @@ template <typename DNA, typename footprint_t = doubleMat> class GA {
 	void setIndDistanceFunction(std::function<double(const Ind_t &, const Ind_t &)> f) {
 		indDistanceFunction = f;
 	}
-	vector<vector<Iptr>> species;  // pointers to the individuals of the species
+	std::vector<std::vector<Iptr>> species;  // pointers to the individuals of the species
 
 	////////////////////////////////////////////////////////////////////////////////////
 
@@ -338,12 +362,9 @@ template <typename DNA, typename footprint_t = doubleMat> class GA {
 	std::default_random_engine globalRand = std::default_random_engine(rd());
 
  protected:
-	vector<Ind_t> archive;  // when novelty is enabled, we store random individuals there
-	                        // (cf. Devising Effective Novelty Search Algorithms: A
-	                        // Comprehensive Empirical Study)
-
-	vector<Ind_t> mostNovelArchive;  // when novelty is enabled, we store the most novel
-	                                 // individuals there
+	std::vector<Ind_t> archive;  // when novelty is enabled, we store random individuals
+	                             // there (cf. Devising Effective Novelty Search Algorithms:
+	                             // A Comprehensive Empirical Study)
 
 	size_t currentGeneration = 0;
 	bool customInit = false;
@@ -377,6 +398,26 @@ template <typename DNA, typename footprint_t = doubleMat> class GA {
 	    [this](const DNA_t &d1, const DNA_t &d2) { return defaultCrossover(d1, d2); };
 	std::function<void(DNA_t &)> mutate = [this](DNA_t &d) { defaultMutate(d); };
 
+	Ind_t mutatedIndividual(const Ind_t &i) {
+		Ind_t offspring(i.dna);
+		mutate(offspring.dna);
+		offspring.parents.clear();
+		offspring.parents.push_back(i.id);
+		offspring.inheritanceType = "mutation";
+		offspring.evaluated = false;
+		return offspring;
+	}
+
+	Ind_t crossoverIndividual(const Ind_t &a, const Ind_t &b) {
+		Ind_t offspring(crossover(a.dna, b.dna));
+		offspring.parents.clear();
+		offspring.parents.push_back(a.id);
+		offspring.parents.push_back(b.id);
+		offspring.inheritanceType = "crossover";
+		offspring.evaluated = false;
+		return offspring;
+	}
+
 	std::function<void(Ind_t &, int)> evaluator;
 	std::function<void(void)> newGenerationFunction = []() {};
 	std::function<void(void)> nextGeneration = [this]() { classicNextGen(); };
@@ -398,7 +439,7 @@ template <typename DNA, typename footprint_t = doubleMat> class GA {
 	/*********************************************************************************
 	 *                          START THE BOUZIN
 	 ********************************************************************************/
-	void setPopulation(const vector<Ind_t> &p) {
+	void setPopulation(const std::vector<Ind_t> &p) {
 		if (procId == 0) {
 			population = p;
 			if (population.size() != popSize)
@@ -469,7 +510,7 @@ template <typename DNA, typename footprint_t = doubleMat> class GA {
 			auto tg0 = high_resolution_clock::now();
 			nextGeneration();
 			if (procId == 0) {  // stats
-				assert(lastGen.size());
+				assert(previousGenerations.back().size());
 				if (population.size() != popSize)
 					throw std::invalid_argument("Population doesn't match the popSize param");
 				auto tg1 = high_resolution_clock::now();
@@ -504,15 +545,24 @@ template <typename DNA, typename footprint_t = doubleMat> class GA {
 	 *                            NEXT POP GETTING READY
 	 ********************************************************************************/
 	void classicNextGen() {
+		// simple next generation routine:
+		// 1 - evaluation (wih obj + novelty fitnesses)
+		// 2 - selection with mutations/crossovers
 		evaluate();
 		if (novelty) updateNovelty();
 		auto nextGen = produceNOffsprings(popSize, population, nbElites);
-		lastGen = population;
+		previousGenerations.push_back(population);
 		population = nextGen;
+		setPopulationId(population, currentGeneration + 1);
 		if (verbosity >= 3) cerr << "Next generation ready" << endl;
 	}
 
+	void setPopulationId(std::vector<Ind_t> &p, size_t genId) {
+		for (size_t i = 0; i < p.size(); ++i) p[i].id = std::make_pair(genId, i);
+	}
+
 	void speciationNextGen() {
+		// next generation routine with speciation
 		// - evaluation de toute la pop, sans se soucier des espèces.
 		// - choix des nouveaux représentants parmis les espèces précédentes (clonage)
 		// - création d'une nouvelle population via selection/mutation/crossover
@@ -545,7 +595,7 @@ template <typename DNA, typename footprint_t = doubleMat> class GA {
 
 		assert(species.size() == speciationThresholds.size());
 
-		vector<Ind_t> nextLeaders;
+		std::vector<Ind_t> nextLeaders;
 		// New species leaders
 		for (auto &s : species) {
 			assert(s.size() > 0);
@@ -563,7 +613,7 @@ template <typename DNA, typename footprint_t = doubleMat> class GA {
 			cerr << "Found " << objectivesList.size() << " objectives" << std::endl;
 
 		// computing afjustedFitnesses
-		vector<unordered_map<string, double>> adjustedFitnessSum(species.size());
+		std::vector<unordered_map<string, double>> adjustedFitnessSum(species.size());
 		unordered_map<string, double> worstFitness;
 		for (const auto &o : objectivesList) {
 			worstFitness[o] = std::numeric_limits<double>::max();
@@ -592,7 +642,7 @@ template <typename DNA, typename footprint_t = doubleMat> class GA {
 		}
 
 		// creating the new population
-		vector<Ind_t> nextGen;
+		std::vector<Ind_t> nextGen;
 		for (const auto &o : objectivesList) {
 			assert(totalAdjustedFitness[o] != 0);
 			for (size_t i = 0; i < species.size(); ++i) {
@@ -609,30 +659,27 @@ template <typename DNA, typename footprint_t = doubleMat> class GA {
 				               std::make_move_iterator(specieOffsprings.end()));
 			}
 		}
-		lastGen = population;
+		previousGenerations.push_back(population);
 		population = nextGen;
+		setPopulationId(population, currentGeneration + 1);
 
 		if (verbosity >= 3)
 			cerr << "Created the new population. Population.size = " << population.size()
 			     << std::endl;
+
 		// correcting rounding errors by adding missing individuals
-		while (population.size() < popSize) {
+		while (population.size() < popSize) {  // we just add mutated leaders
 			std::uniform_int_distribution<size_t> d(0, nextLeaders.size() - 1);
-			// we just add mutated leaders
-			auto offspring = nextLeaders[d(globalRand)];
-			mutate(offspring.dna);
-			offspring.evaluated = false;
-			population.push_back(offspring);
+			population.push_back(mutatiedIndividual(nextLeaders[d(globalRand)]));
 		}
-		while (population.size() > popSize) {
-			population.erase(population.begin());
-		}
+		while (population.size() > popSize) population.pop_back();  // or delete the extra
+
 		assert(population.size() == popSize);
 
 		// reevaluating the new guys
 		evaluate();
-
 		if (novelty) updateNovelty();
+
 		// creating new species
 		species.clear();
 		species.resize(nextLeaders.size());
@@ -642,7 +689,7 @@ template <typename DNA, typename footprint_t = doubleMat> class GA {
 			size_t closestLeader = 0;
 			double closestDist = std::numeric_limits<double>::max();
 			bool foundSpecie = false;
-			vector<double> distances(nextLeaders.size());
+			std::vector<double> distances(nextLeaders.size());
 
 			std::vector<std::future<void>> futures;
 			for (size_t l = 0; l < nextLeaders.size(); ++l)
@@ -676,10 +723,11 @@ template <typename DNA, typename footprint_t = doubleMat> class GA {
 		assert(species.size() == speciationThresholds.size());
 
 		// deleting small species
-		vector<Iptr> toReplace;  // list of individuals without specie. We need to replace
-		                         // them with new individuals. We use this because we
-		                         // cannot directly delete individuals from the population
-		                         // without invalidating all other pointers;
+		std::vector<Iptr>
+		    toReplace;  // list of individuals without specie. We need to replace
+		                // them with new individuals. We use this because we
+		                // cannot directly delete individuals from the population
+		                // without invalidating all other pointers;
 		size_t cpt = 0;
 
 		if (verbosity >= 3) {
@@ -720,17 +768,16 @@ template <typename DNA, typename footprint_t = doubleMat> class GA {
 				auto &i = toReplace[tr];
 				// we choose one random specie and mutate
 				// individuals until the new ind can fit
-				i->evaluated = false;
-				auto selection = getSelectionMethod<vector<Iptr>>();
+				auto selection = getSelectionMethod<std::vector<Iptr>>();
 				std::uniform_int_distribution<size_t> d(0, nextLeaders.size() - 1);
 				size_t leaderID = d(globalRand);
 				unsigned int c = 0;
 				do {
 					if (c++ > MAX_SPECIATION_TRIES)
 						throw std::runtime_error("Too many tries. Speciation thresholds too low.");
-					// /!\ Selection cannot work properly here, as lots of new individuals
-					// haven't been evaluated yet.
-					i->dna = selection(species[leaderID])->dna;
+
+					// TODO selection is not ideal here. The species hasnt been entirely evaluated.
+					*i = mutatedIndividual(*selection(species[leaderID]));
 				} while (indDistanceFunction(*i, nextLeaders[leaderID]) >
 				         speciationThresholds[leaderID]);
 			}));
@@ -764,26 +811,34 @@ template <typename DNA, typename footprint_t = doubleMat> class GA {
 				cerr << " - " << s.size() << std::endl;
 			}
 		}
+
+		setPopulationId(population, currentGeneration + 1);
 	}
 
 	template <typename I>  // I is ither Ind_t or Ind_t*
-	vector<Ind_t> produceNOffsprings(size_t n, vector<I> &popu, size_t nElites = 0) {
+	std::vector<Ind_t> produceNOffsprings(size_t n, std::vector<I> &popu,
+	                                      size_t nElites = 0) {
 		assert(popu.size() >= nElites);
 		if (verbosity >= 3)
 			cerr << "Going to produce " << n << " offsprings out of " << popu.size()
 			     << " individuals" << endl;
 		std::uniform_real_distribution<double> d(0.0, 1.0);
-		vector<Ind_t> nextGen;
+		std::vector<Ind_t> nextGen;
 		nextGen.reserve(n);
 		// Elites are placed at the begining
 		if (nElites > 0) {
 			auto elites = getElites(nElites, popu);
 			if (verbosity >= 3) cerr << "elites.size = " << elites.size() << endl;
 			for (auto &e : elites)
-				for (auto &i : e.second) nextGen.push_back(i);
+				for (auto i : e.second) {
+					i.parents.clear();
+					i.parents.push_back(i.id);
+					i.inheritanceType = "copy";
+					nextGen.push_back(i);
+				}
 		}
 
-		auto selection = getSelectionMethod<vector<I>>();
+		auto selection = getSelectionMethod<std::vector<I>>();
 
 		auto s = nextGen.size();
 
@@ -795,9 +850,7 @@ template <typename DNA, typename footprint_t = doubleMat> class GA {
 		std::vector<std::future<void>> futures;
 		for (size_t i = s; i < nCross + s; ++i) {
 			futures.push_back(tp.push([&]() {
-				auto *p0 = selection(popu);
-				auto *p1 = selection(popu);
-				Ind_t offspring(crossover(p0->dna, p1->dna));
+				auto offspring = crossoverIndividual(*selection(popu), *selection(popu));
 				std::lock_guard<std::mutex> thread_lock(nextGenMutex);
 				nextGen.push_back(offspring);
 			}));
@@ -805,9 +858,7 @@ template <typename DNA, typename footprint_t = doubleMat> class GA {
 
 		for (size_t i = nCross + s; i < nMut + nCross + s; ++i) {
 			futures.push_back(tp.push([&]() {
-				auto ind = *selection(popu);
-				mutate(ind.dna);
-				ind.evaluated = false;
+				auto ind = mutatedIndividual(*selection(popu));
 				std::lock_guard<std::mutex> thread_lock(nextGenMutex);
 				nextGen.push_back(ind);
 			}));
@@ -815,7 +866,13 @@ template <typename DNA, typename footprint_t = doubleMat> class GA {
 
 		for (auto &f : futures) f.get();
 
-		while (nextGen.size() < n) nextGen.push_back(*selection(popu));
+		while (nextGen.size() < n) {
+			auto i = *selection(popu);
+			i.parents.clear();
+			i.parents.push_back(i.id);
+			i.inheritanceType = "copy";
+			nextGen.push_back(i);
+		}
 
 		assert(nextGen.size() == n);
 		return nextGen;
@@ -828,10 +885,10 @@ template <typename DNA, typename footprint_t = doubleMat> class GA {
 		return true;
 	}
 
-	vector<Ind_t *> getParetoFront(const std::vector<Ind_t *> &ind) const {
+	std::vector<Ind_t *> getParetoFront(const std::vector<Ind_t *> &ind) const {
 		// naive algorithm. Should be ok for small ind.size()
 		assert(ind.size() > 0);
-		vector<Ind_t *> pareto;
+		std::vector<Ind_t *> pareto;
 		for (size_t i = 0; i < ind.size(); ++i) {
 			bool dominated = false;
 			for (auto &j : pareto) {
@@ -855,7 +912,7 @@ template <typename DNA, typename footprint_t = doubleMat> class GA {
 		return pareto;
 	}
 
-	template <typename I> Ind_t *paretoTournament(vector<I> &subPop) {
+	template <typename I> Ind_t *paretoTournament(std::vector<I> &subPop) {
 		assert(subPop.size() > 0);
 		std::uniform_int_distribution<size_t> dint(0, subPop.size() - 1);
 		std::vector<Ind_t *> participants;
@@ -867,7 +924,7 @@ template <typename DNA, typename footprint_t = doubleMat> class GA {
 		return pf[dpf(globalRand)];
 	}
 
-	template <typename I> Ind_t *randomObjTournament(vector<I> &subPop) {
+	template <typename I> Ind_t *randomObjTournament(std::vector<I> &subPop) {
 		assert(subPop.size() > 0);
 		if (verbosity >= 3) cerr << "random obj tournament called" << endl;
 		std::uniform_int_distribution<size_t> dint(0, subPop.size() - 1);
@@ -894,35 +951,37 @@ template <typename DNA, typename footprint_t = doubleMat> class GA {
 		return champion;
 	}
 
-	// getELites methods : returns a vector of N best individuals in the specified
+	// getELites methods : returns a std::vector of N best individuals in the specified
 	// subPopulations, for the specified fitnesses.
 	// elites indivuduals are not ordered.
-	unordered_map<string, vector<Ind_t>> getElites(size_t n) {
-		vector<string> obj;
+	unordered_map<string, std::vector<Ind_t>> getElites(size_t n) {
+		std::vector<string> obj;
 		for (auto &o : population[0].fitnesses) obj.push_back(o.first);
 		return getElites(obj, n, population);
 	}
 
 	template <typename I>
-	unordered_map<string, vector<Ind_t>> getElites(size_t n, const vector<I> &popVec) {
-		vector<string> obj;
+	unordered_map<string, std::vector<Ind_t>> getElites(size_t n,
+	                                                    const std::vector<I> &popVec) {
+		std::vector<string> obj;
 		for (auto &o : ref(popVec[0]).fitnesses) obj.push_back(o.first);
 		return getElites(obj, n, popVec);
 	}
-	unordered_map<string, vector<Ind_t>> getLastGenElites(size_t n) {
-		vector<string> obj;
+	unordered_map<string, std::vector<Ind_t>> getLastGenElites(size_t n) {
+		std::vector<string> obj;
 		for (auto &o : population[0].fitnesses) obj.push_back(o.first);
-		return getElites(obj, n, lastGen);
+		return getElites(obj, n, previousGenerations.back());
 	}
 	template <typename I>
-	unordered_map<string, vector<Ind_t>> getElites(const vector<string> &obj, size_t n,
-	                                               const vector<I> &popVec) {
+	unordered_map<string, std::vector<Ind_t>> getElites(const std::vector<string> &obj,
+	                                                    size_t n,
+	                                                    const std::vector<I> &popVec) {
 		if (verbosity >= 3) {
 			cerr << "getElites : nbObj = " << obj.size() << " n = " << n << endl;
 		}
-		unordered_map<string, vector<Ind_t>> elites;
+		unordered_map<string, std::vector<Ind_t>> elites;
 		for (auto &o : obj) {
-			elites[o] = vector<Ind_t>();
+			elites[o] = std::vector<Ind_t>();
 			elites[o].push_back(ref(popVec[0]));
 			size_t worst = 0;
 			for (size_t i = 1; i < n && i < popVec.size(); ++i) {
@@ -946,13 +1005,12 @@ template <typename DNA, typename footprint_t = doubleMat> class GA {
 	/*********************************************************************************
 	 *                          NOVELTY RELATED METHODS
 	 ********************************************************************************/
-	// Novelty works with footprints. A footprint is just a vector of vector of doubles.
-	// It is recommended that those doubles are within a same order of magnitude.
-	// Each vector<double> is a "snapshot": it represents the state of the evaluation of
-	// one individual at a certain time. Thus, a complete footprint is a combination
-	// of one or more snapshot taken at different points in the
-	// simulation (a vector<vector<double>>).
-	// Snapshot must be of same size accross individuals.
+	// Novelty works with footprints. A footprint is just a std::vector of std::vector of
+	// doubles. It is recommended that those doubles are within a same order of magnitude.
+	// Each std::vector<double> is a "snapshot": it represents the state of the evaluation
+	// of one individual at a certain time. Thus, a complete footprint is a combination of
+	// one or more snapshot taken at different points in the simulation (a
+	// std::vector<vector<double>>). Snapshot must be of same size accross individuals.
 	// Footprint must be set in the evaluator (see examples)
 	double getFootprintDistance(const footprint_t &f0, const footprint_t &f1) {
 		assert(f0.size() == f1.size());
@@ -968,13 +1026,13 @@ template <typename DNA, typename footprint_t = doubleMat> class GA {
 	// computeAvgDist (novelty related)
 	// returns the average distance of a footprint fp to its k nearest neighbours
 	// in an archive of footprints
-	double computeAvgDist(size_t K, const vector<Ind_t> &arch, const footprint_t &fp) {
+	double computeAvgDist(size_t K, const std::vector<Ind_t> &arch, const footprint_t &fp) {
 		double avgDist = 0;
 		if (arch.size() > 1) {
 			size_t k = arch.size() < K ? static_cast<size_t>(arch.size()) : K;
-			vector<Ind_t> knn;
+			std::vector<Ind_t> knn;
 			knn.reserve(k);
-			vector<double> knnDist;
+			std::vector<double> knnDist;
 			knnDist.reserve(k);
 			std::pair<double, size_t> worstKnn = {
 			    computeFootprintDistance(fp, arch[0].footprint),
@@ -1023,7 +1081,7 @@ template <typename DNA, typename footprint_t = doubleMat> class GA {
 			archive.push_back(ind);
 		}
 		std::pair<Ind_t *, double> best = {&population[0], 0};
-		vector<Ind_t> toBeAdded;
+		std::vector<Ind_t> toBeAdded;
 		for (auto &ind : population) {
 			double avgD = computeAvgDist(KNN, archive, ind.footprint);
 			ind.fitnesses["novelty"] = avgD;
@@ -1143,7 +1201,8 @@ template <typename DNA, typename footprint_t = doubleMat> class GA {
 		// stats organisations :
 		// "global" -> {"genTotalTime", "indTotalTime", "maxTime", "nEvals", "nObjs"}
 		// "obj_i" -> {"avg", "worst", "best"}
-		assert(lastGen.size());
+		assert(previousGenerations.size());
+		auto &lastGen = previousGenerations.back();
 		std::map<std::string, std::map<std::string, double>> currentGenStats;
 		currentGenStats["global"]["genTotalTime"] = totalTime;
 		double indTotalTime = 0.0, maxTime = 0.0;
@@ -1155,7 +1214,7 @@ template <typename DNA, typename footprint_t = doubleMat> class GA {
 		}
 		// computing min, avg, max from custom individual stats
 		auto customStatsNames = lastGen[0].stats;
-		map<string, std::tuple<double, double, double>> customStats;
+		std::map<string, std::tuple<double, double, double>> customStats;
 		for (auto &csn : customStatsNames)
 			customStats[csn.first] = std::make_tuple<double, double, double>(
 			    std::numeric_limits<double>::max(), 0.0, std::numeric_limits<double>::min());
@@ -1339,9 +1398,9 @@ template <typename DNA, typename footprint_t = doubleMat> class GA {
 	 ********************************************************************************/
 	void saveBests(size_t n) {
 		if (n > 0) {
-			const vector<Ind_t> &p = lastGen;
+			const std::vector<Ind_t> &p = previousGenerations.back();
 			// save n bests dnas for all objectives
-			vector<string> objectives;
+			std::vector<string> objectives;
 			for (auto &o : p[0].fitnesses) {
 				objectives.push_back(o.first);  // we need to know objective functions
 			}
@@ -1370,7 +1429,7 @@ template <typename DNA, typename footprint_t = doubleMat> class GA {
 	}
 
 	void saveParetoFront() {
-		vector<Ind_t> &p = lastGen;
+		std::vector<Ind_t> &p = previousGenerations.back();
 		std::vector<Ind_t *> pop;
 		for (size_t i = 0; i < p.size(); ++i) {
 			pop.push_back(&p[i]);
@@ -1438,6 +1497,7 @@ template <typename DNA, typename footprint_t = doubleMat> class GA {
 		std::stringstream fileName;
 		fileName << folder << "/ind_stats.csv";
 		static bool indStatsWritten = false;
+		auto &lastGen = previousGenerations.back();
 		if (!indStatsWritten) {
 			csv << "generation,idInd,";
 			for (auto &o : lastGen[0].fitnesses) csv << o.first << ",";
@@ -1469,7 +1529,7 @@ template <typename DNA, typename footprint_t = doubleMat> class GA {
 		if (!has_been_written) {
 			csv << "generation";
 			size_t i = 0;
-			for (const auto &ind : lastGen) {
+			for (const auto &ind : previousGenerations.back()) {
 				csv << ",ind" << i++;
 				for (const auto &f : ind.fitnesses) {
 					csv << "," << f.first;
@@ -1481,12 +1541,12 @@ template <typename DNA, typename footprint_t = doubleMat> class GA {
 			has_been_written = true;
 		}
 
-		std::vector<int> is_on_front(lastGen.size(), false);
+		std::vector<int> is_on_front(previousGenerations.back().size(), false);
 
 		if (selecMethod == SelectionMethod::paretoTournament) {
 			std::vector<Ind_t *> pop;
 
-			for (auto &p : lastGen) {
+			for (auto &p : previousGenerations.back()) {
 				pop.push_back(&p);
 			}
 
@@ -1511,7 +1571,7 @@ template <typename DNA, typename footprint_t = doubleMat> class GA {
 		{
 			csv << currentGeneration;
 			size_t ind_id = 0;
-			for (const auto &ind : lastGen) {
+			for (const auto &ind : previousGenerations.back()) {
 				csv << "," << ind_id;
 				for (const auto &f : ind.fitnesses) {
 					csv << "," << f.second;
@@ -1601,7 +1661,7 @@ template <typename DNA, typename footprint_t = doubleMat> class GA {
 	}
 
 	void savePop() {
-		json o = Ind_t::popToJSON(lastGen);
+		json o = Ind_t::popToJSON(previousGenerations.back());
 		o["evaluator"] = evaluatorName;
 		o["generation"] = currentGeneration;
 		std::stringstream baseName;
