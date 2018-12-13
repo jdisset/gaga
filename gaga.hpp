@@ -324,7 +324,7 @@ template <typename DNA, typename footprint_t = doubleMat> class GA {
 	// for novelty:
 	void enableNovelty() { novelty = true; }
 	void disableNovelty() { novelty = false; }
-	bool noveltyEnabled() { return novelty; }
+	bool noveltyEnabled() const { return novelty; }
 	void setKNN(size_t n) { KNN = n; }
 	size_t getKNN() { return KNN; }
 	template <typename F> void setComputeFootprintDistanceFunction(F &&f) {
@@ -356,7 +356,11 @@ template <typename DNA, typename footprint_t = doubleMat> class GA {
 		indDistanceFunction = f;
 	}
 	size_t getCurrentGenerationNumber() const { return currentGeneration; }
+
 	std::vector<std::vector<Iptr>> species;  // pointers to the individuals of the species
+
+	// genStats will be populated with some basic generation stats
+	std::vector<std::map<std::string, std::map<std::string, double>>> genStats;
 
 	////////////////////////////////////////////////////////////////////////////////////
 
@@ -372,9 +376,6 @@ template <typename DNA, typename footprint_t = doubleMat> class GA {
 	bool customInit = false;
 	int procId = 0;
 	int nbProcs = 1;
-
-	// genStats will be populated with some basic generation stats
-	std::vector<std::map<std::string, std::map<std::string, double>>> genStats;
 
 	// default mutate and crossover are taken from the DNA_t class, if they are defined.
 	template <class D> auto defaultMutate(D &d) -> decltype(d.mutate()) { d.mutate(); }
@@ -460,7 +461,7 @@ template <typename DNA, typename footprint_t = doubleMat> class GA {
 				population[population.size() - 1].evaluated = false;
 			}
 		}
-		setPoplationId(population, currentGeneration);
+		setPopulationId(population, currentGeneration);
 	}
 
 	template <typename... Args> void printLn(size_t lvl, Args &&... a) {
