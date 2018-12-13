@@ -245,6 +245,7 @@ template <typename DNA, typename footprint_t = doubleMat> class GA {
 	void disablePopulationSave() { savePopEnabled = false; }
 	void enableArchiveSave() { saveArchiveEnabled = true; }
 	void disableArchiveSave() { saveArchiveEnabled = false; }
+	const std::vector<Ind_t> &getArchive() const { return archive; }
 	void setVerbosity(unsigned int lvl) { verbosity = lvl <= 3 ? (lvl >= 0 ? lvl : 0) : 3; }
 	void setPopSize(size_t s) { popSize = s; }
 	size_t getPopSize() { return popSize; }
@@ -354,6 +355,7 @@ template <typename DNA, typename footprint_t = doubleMat> class GA {
 	void setIndDistanceFunction(std::function<double(const Ind_t &, const Ind_t &)> f) {
 		indDistanceFunction = f;
 	}
+	size_t getCurrentGenerationNumber() const { return currentGeneration; }
 	std::vector<std::vector<Iptr>> species;  // pointers to the individuals of the species
 
 	////////////////////////////////////////////////////////////////////////////////////
@@ -446,6 +448,7 @@ template <typename DNA, typename footprint_t = doubleMat> class GA {
 				throw std::invalid_argument("Population doesn't match the popSize param");
 			popSize = population.size();
 		}
+		setPoplationId(population, currentGeneration);
 	}
 
 	void initPopulation(const std::function<DNA()> &f) {
@@ -457,6 +460,7 @@ template <typename DNA, typename footprint_t = doubleMat> class GA {
 				population[population.size() - 1].evaluated = false;
 			}
 		}
+		setPoplationId(population, currentGeneration);
 	}
 
 	template <typename... Args> void printLn(size_t lvl, Args &&... a) {
