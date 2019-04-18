@@ -53,6 +53,12 @@
 #define GAGA_COLOR_GREENBOLD "\033[1;32m"
 #define GAGA_COLOR_NORMAL "\033[0m"
 
+#ifdef GAGA_TESTING
+#define GAGA_PROTECTED_TESTABLE public
+#else
+#define GAGA_PROTECTED_TESTABLE protected
+#endif
+
 namespace GAGA {
 
 using std::cerr;
@@ -186,11 +192,12 @@ void from_json(const nlohmann::json &j, Individual<DNA, f> &i) {
 
 enum class SelectionMethod { paretoTournament, randomObjTournament };
 template <typename DNA, typename footprint_t = doubleMat> class GA {
- protected:
-	/*********************************************************************************
-	 *                            MAIN GA SETTINGS
-	 ********************************************************************************/
-	unsigned int verbosity = 2;           // 0 = silent; 1 = generations stats;
+	GAGA_PROTECTED_TESTABLE :
+
+	    /*********************************************************************************
+	     *                            MAIN GA SETTINGS
+	     ********************************************************************************/
+	    unsigned int verbosity = 2;       // 0 = silent; 1 = generations stats;
 	                                      // 2 = individuals stats; 3 = everything
 	size_t popSize = 500;                 // nb of individuals in the population
 	size_t nbElites = 1;                  // nb of elites to keep accross generations
@@ -367,10 +374,12 @@ template <typename DNA, typename footprint_t = doubleMat> class GA {
 	std::random_device rd;
 	std::default_random_engine globalRand = std::default_random_engine(rd());
 
- protected:
-	std::vector<Ind_t> archive;  // when novelty is enabled, we store random individuals
-	                             // there (cf. Devising Effective Novelty Search Algorithms:
-	                             // A Comprehensive Empirical Study)
+	GAGA_PROTECTED_TESTABLE :
+
+	    std::vector<Ind_t>
+	        archive;  // when novelty is enabled, we store random individuals
+	                  // there (cf. Devising Effective Novelty Search Algorithms:
+	                  // A Comprehensive Empirical Study)
 
 	size_t currentGeneration = 0;
 	bool customInit = false;
@@ -449,7 +458,7 @@ template <typename DNA, typename footprint_t = doubleMat> class GA {
 				throw std::invalid_argument("Population doesn't match the popSize param");
 			popSize = population.size();
 		}
-		setPoplationId(population, currentGeneration);
+		setPopulationId(population, currentGeneration);
 	}
 
 	void initPopulation(const std::function<DNA()> &f) {
@@ -546,6 +555,7 @@ template <typename DNA, typename footprint_t = doubleMat> class GA {
 			++currentGeneration;
 		}
 	}
+
 	/*********************************************************************************
 	 *                            NEXT POP GETTING READY
 	 ********************************************************************************/
@@ -562,8 +572,11 @@ template <typename DNA, typename footprint_t = doubleMat> class GA {
 		if (verbosity >= 3) cerr << "Next generation ready" << endl;
 	}
 
+
 	void setPopulationId(std::vector<Ind_t> &p, size_t genId) {
+		// reinitialize individuals' id to a pair {genId , 0 to N}
 		for (size_t i = 0; i < p.size(); ++i) p[i].id = std::make_pair(genId, i);
+
 	}
 
 	void speciationNextGen() {
@@ -1351,8 +1364,10 @@ template <typename DNA, typename footprint_t = doubleMat> class GA {
 		std::cout << output.str();
 	}
 
- protected:
-	std::string tableHeader(unsigned int l) {
+	GAGA_PROTECTED_TESTABLE :
+
+	    std::string
+	    tableHeader(unsigned int l) {
 		std::ostringstream output;
 		output << "┌";
 		for (auto i = 0u; i < l; ++i) output << "─";
@@ -1598,8 +1613,10 @@ template <typename DNA, typename footprint_t = doubleMat> class GA {
 		fs.close();
 	}
 
- protected:
-	int mkd(const char *p) {
+	GAGA_PROTECTED_TESTABLE :
+
+	    int
+	    mkd(const char *p) {
 #ifdef _WIN32
 		return _mkdir(p);
 #else

@@ -29,13 +29,13 @@ The main thing you need to provide is a valid DNA class, whose minimal requireme
 
 Internally, GAGA manipulates `Individuals` struct instances, whose raw dna member is accessible through `individual.dna`.
 
-You can initialize your GAGA instance using your custom DNA (command lines argument are required):
+You can initialize your GAGA instance using your custom DNA:
 ```c++
-GAGA::GA<DNA> ga(argc, argv);
+GAGA::GA<DNA> ga;
 ```
 Or if you plan on using novelty search with a custom footprint type `footprint_t`:
 ```c++
-GAGA::GA<DNA, footprint_t> ga(argc, argv);
+GAGA::GA<DNA, footprint_t> ga;
 ```
 
 ### Evaluator
@@ -74,8 +74,8 @@ If you need to use MPI parralelism (when running on a cluster for example), `#de
 ## Main options and configuration methods
 ### General
  - `setPopSize(unsigned int)`: sets the number of individual in the population
- - `setMutationProba(double)`: sets the probability for an individual to be mutated.
- - `setCrossoverProba(double)`: sets the probability that a crossover will be happening.
+ - `setMutationRate(double)`: sets the proportion of mutated individuals
+ - `setCrossoverRate(double)`: sets the proportion of crossed individuals
  - `setSelectionMethod(const SelectionMethod&)`: specifies the selection method to use. (Available: paretoTournament, randomObjTournament)
  - `setTournamentSize(unsigned int)`: when a tournament based selection is used, changes the tournament size.
  - `setNbElites(unsigned int n)`: for each new generation, the n bests individuals will be preserved. (with multiple objectives, "best" can have different meanings depending on the current selection method) 

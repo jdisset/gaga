@@ -1,3 +1,6 @@
+#define GAGA_TESTING
+#define CATCH_CONFIG_MAIN
+
 #include "../gaga.hpp"
 #include "catch/catch.hpp"
 #include "dna.hpp"
@@ -6,10 +9,10 @@
 #include "grgen/grn.hpp"
 
 template <typename T> void initGA() {
-	GAGA::GA<T> ga(0, nullptr);
+	GAGA::GA<T> ga;
 	ga.setVerbosity(0);
-	ga.setMutationProba(0.7);
-	ga.setCrossoverProba(0.3);
+	ga.setMutationRate(0.7);
+	ga.setCrossoverRate(0.3);
 	ga.setEvaluator([](auto &i, int) { i.fitnesses["value"] = i.dna.value; });
 	REQUIRE((ga.population.size() == 0));
 	ga.setPopSize(200);
@@ -34,7 +37,7 @@ TEST_CASE("Population is initialized ok, individuals are improving", "[populatio
 
 void helpersMethods() {
 	const int N = 50;
-	GAGA::GA<IntDNA> ga(0, nullptr);
+	GAGA::GA<IntDNA> ga;
 	ga.setVerbosity(0);
 	ga.setNbThreads(10);
 	ga.setEvaluator([](auto &i, int) {
@@ -43,8 +46,8 @@ void helpersMethods() {
 	});
 	int i = 0;
 	ga.setPopSize(N);
-	ga.setMutationProba(0);
-	ga.setCrossoverProba(0);
+	ga.setMutationRate(0);
+	ga.setCrossoverRate(0);
 	ga.initPopulation([&]() {
 		IntDNA d;
 		d.value = i++;
@@ -102,7 +105,7 @@ void helpersMethods() {
 TEST_CASE("Helpers methods ok", "[methods]") { helpersMethods(); }
 
 template <typename T> void GRNGA() {
-	GAGA::GA<T> ga(0, nullptr);
+	GAGA::GA<T> ga;
 	size_t popsize = 100;
 	ga.setVerbosity(0);
 	ga.setNbThreads(10);
