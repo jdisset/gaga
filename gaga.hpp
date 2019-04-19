@@ -34,8 +34,8 @@
 #include <unordered_set>
 #include <utility>
 #include <vector>
-#include "include/cxxpool.hpp"
-#include "include/json.hpp"
+#include "third_party/cxxpool.hpp"
+#include "third_party/json.hpp"
 
 #define GAGA_COLOR_PURPLE "\033[35m"
 #define GAGA_COLOR_PURPLEBOLD "\033[1;35m"
@@ -895,6 +895,10 @@ template <typename DNA, typename footprint_t = doubleMat> class GA {
 		assert(nextGen.size() == n);
 		return nextGen;
 	}
+
+
+
+	// PARETO HELPERS
 
 	bool paretoDominates(const Ind_t &a, const Ind_t &b) const {
 		for (auto &o : a.fitnesses) {

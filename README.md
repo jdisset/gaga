@@ -6,19 +6,20 @@
 Header-only parallel multi-objective genetic algorithm library written in C++14.
 
 ## Features
+ - Extensible & highly customizable
  - Multi-objective 
  - Speciation 
  - Novelty search
  - Native C++ parralelism
- - Possibility to enable MPI (#define GAGA_MPI_CLUSTER)
  - No external dependencies
  - Meant to be easy to use and easy to install (header-only)
  - Advanced console logging and stats generations
+ - Network distributed evaluations (cf. gagatools repository)
 
 ## Installation
 Simply clone this repository, copy the directory in your project (or just the gaga.hpp file and the include folder) and include gaga.hpp in your project. Don't forget to enable c++14 when compiling.
 
-## Usage
+## Basic Usage
 ### DNA & Individual
 The main thing you need to provide is a valid DNA class, whose minimal requirements are:
  - a `std::string serialize()` method
@@ -39,7 +40,7 @@ GAGA::GA<DNA, footprint_t> ga;
 ```
 
 ### Evaluator
-An evaluator is a lambda function that takes an individual and sets its map (and footprints when novelty is enabled). It has to be passed to the GAGA instance through the `setEvaluator` method, which takes a reference to an individual and the id of the thread that is being used.
+An evaluator is a lambda function that takes an individual and sets its fitnesses (and footprints when novelty is enabled). It has to be passed to the GAGA instance through the `setEvaluator` method, which takes a reference to an individual and the id of the thread that is being used.
 ```c++
 ga.setEvaluator([](auto &i, int procId) { 
 	i.fitnesses["obj0"] = i.dna.doYourThing(); 
@@ -70,6 +71,12 @@ See tests for more examples.
 ## Parallelism
 GAGA supports both MPI and native C++ thread based parallelism. For the natice c++ parallelisation (recommended on shared memory architectures), you need to set the number of threads using GAGA::setNbThreads(). Default is 1 thread.
 If you need to use MPI parralelism (when running on a cluster for example), `#define GAGA_MPI_CLUSTER` before including gaga. You then need to link the MPI library of your choice (OpenMPI or IntelMPI for example) when compiling.
+
+## Advanced customization
+Although GAGA provides sane "basic" defaults, most key algorithmic steps of the Genetic Algorithm can be swapped and augmented. Here is a brief overview of the main blocks:
+ - `newGenerationFunction()` is a lambda called at the begining of every `step()`. Default doesn't do anything, so feel free to use it as a hook.
+ - `nextGenerationFunction()` is a lambda that acts as a wrapper for the main method, currently either `classic()` or `speciation()`. You can write your own main method.
+ - `evaluate()` is a lambda used both by the classic and the speciation main methods. It calls the evaluator on every individuals, evaluating them in parallel using a threadpool. You could replace this if you know what you are doing. That's, for example, what the zero-mq distributed evaluation does. (Cf. gagatools)
 
 ## Main options and configuration methods
 ### General
@@ -110,3 +117,8 @@ When speciation is enabled, you have to provide a distance function that will re
  - `setSpeciationThresholdIncrement(double)`: the speed at which the speciation threshold will fluctuate.
  - `setMinSpecieSize(double)`: the minimum specie size.
  
+## Logging
+In addition to the verbosity options and the Generation + Individual stats (see above), some precious lineage information is stored in each individual. You can access every individual in the current generation through the `GAGA::population` container.
+It is thus relatively trivial to create, for example, an ancestry tree for your evolutionary runs. 
+In the gagatools repository, a SQLite wrapper will conveniently store all of this information in a neat sql satabase.
+
