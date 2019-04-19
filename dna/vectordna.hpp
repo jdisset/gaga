@@ -1,13 +1,13 @@
 #pragma once
-#include <metaconfig/metaconfig.hpp>
 #include <random>
 #include <vector>
-#include "../include/json.hpp"
+#include "../third_party/json.hpp"
 
+
+/**
+ * @brief a configurable vector DNA with single point crossover and json serialization
+ */
 namespace GAGA {
-
-template <typename T> void from_json(const nlohmann::json& j, T& e) { e.from_json(j); }
-template <typename T> void to_json(nlohmann::json& j, const T& e) { j = e.to_json(); }
 
 template <typename T, typename R>
 size_t chooseAction(const std::vector<T> probs, R& randEngine) {
@@ -22,20 +22,13 @@ size_t chooseAction(const std::vector<T> probs, R& randEngine) {
 
 template <typename T> struct VectorDNA {
 	struct Config {
-		DECLARE_CONFIG(Config, (size_t, initialSize), (size_t, minSize), (size_t, maxSize),
-		               (bool, mutateSize), (double, modifyProba), (double, addProba),
-		               (double, eraseProba))
-
-		Config() {
-			// default values
-			initialSize = 2;
-			minSize = 1;
-			maxSize = 100;
-			mutateSize = false;
-			modifyProba = 0.8;
-			addProba = 0.1;
-			eraseProba = 0.1;
-		}
+		size_t initialSize = 2;
+		size_t minSize = 1;
+		size_t maxSize = 100;
+		bool mutateSize = false;
+		double modifyProba = 0.8;
+		double addProba = 0.1;
+		double eraseProba = 0.1;
 	};
 
 	using json = nlohmann::json;

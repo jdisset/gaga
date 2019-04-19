@@ -1,7 +1,7 @@
 #pragma once
 #include <array>
 #include <random>
-#include "../include/json.hpp"
+#include "../third_party/json.hpp"
 namespace GAGA {
 template <typename T, size_t N> struct ArrayDNA {
 	using json = nlohmann::json;
