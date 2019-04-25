@@ -7,6 +7,7 @@
 #include "grgen/classic.hpp"
 #include "grgen/common.h"
 #include "grgen/grn.hpp"
+#include "gagazmq_tests.hpp"
 
 template <typename T> void initGA() {
 	GAGA::GA<T> ga;

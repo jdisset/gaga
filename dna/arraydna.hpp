@@ -1,5 +1,6 @@
 #pragma once
 #include <array>
+#include <iostream>
 #include <random>
 #include "../third_party/json.hpp"
 namespace GAGA {

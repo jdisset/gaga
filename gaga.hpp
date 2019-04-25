@@ -67,11 +67,17 @@ using std::endl;
 using std::string;
 using std::unordered_map;
 using std::unordered_set;
-using doubleMat = std::vector<std::vector<double>>;  // footprints for novelty
+using simpleVec = std::vector<double>;  // footprints for novelty
 using json = nlohmann::json;
 using std::chrono::high_resolution_clock;
 using std::chrono::milliseconds;
 using std::chrono::system_clock;
+
+template <typename T, typename U>
+std::ostream &operator<<(std::ostream &out, const std::pair<T, U> &p) {
+	out << "{" << p.first << ", " << p.second << "}";
+	return out;
+}
 
 /******************************************************************************************
  *                                 GAGA LIBRARY
@@ -92,17 +98,20 @@ using std::chrono::system_clock;
 // void reset()
 // json toJson()
 
-template <typename DNA, typename footprint_t = doubleMat> struct Individual {
+template <typename DNA, typename F = simpleVec> struct Individual {
+	using footprint_t = F;
+
 	DNA dna;
 
-	std::map<string, double> fitnesses;  // std::map {"fitnessCriterName" -> "fitnessValue"}
-	footprint_t footprint;               // individual's footprint for novelty computation
+	std::map<std::string, double>
+	    fitnesses;          // std::map {"fitnessCriterName" -> "fitnessValue"}
+	footprint_t footprint;  // individual's footprint for novelty computation
 	bool evaluated = false;
 	bool wasAlreadyEvaluated = false;
 	double evalTime = 0.0;
 	std::pair<size_t, size_t> id{0u, 0u};  // gen id , ind id
 
-	string infos;  // custom infos, description, whatever... filled by user
+	std::string infos;  // custom infos, description, whatever... filled by user
 	std::map<string, double> stats;  // custom stats, filled by user
 	// ancestry & lineage
 	std::vector<std::pair<size_t, size_t>>
@@ -115,17 +124,17 @@ template <typename DNA, typename footprint_t = doubleMat> struct Individual {
 
 	explicit Individual(const json &o) {
 		assert(o.count("dna"));
-		dna = DNA(o.at("dna").dump());
+		dna = DNA(o.at("dna").get<std::string>());
 		if (o.count("footprint")) footprint = o.at("footprint").get<footprint_t>();
 		if (o.count("fitnesses")) fitnesses = o.at("fitnesses").get<decltype(fitnesses)>();
 		if (o.count("infos")) infos = o.at("infos");
 		if (o.count("evaluated")) evaluated = o.at("evaluated");
 		if (o.count("alreadyEval")) wasAlreadyEvaluated = o.at("alreadyEval");
 		if (o.count("evalTime")) evalTime = o.at("evalTime");
-		if (o.count("stats")) stats = o.at("stats");
-		if (o.count("parents")) stats = o.at("parents");
-		if (o.count("inheritanceType")) stats = o.at("inheritanceType");
-		if (o.count("id")) id = o.at("id");
+		if (o.count("stats")) stats = o.at("stats").get<decltype(stats)>();
+		if (o.count("parents")) parents = o.at("parents").get<decltype(parents)>();
+		if (o.count("inheritanceType")) inheritanceType = o.at("inheritanceType");
+		if (o.count("id")) id = o.at("id").get<decltype(id)>();
 	}
 
 	// Exports individual to json
@@ -191,7 +200,13 @@ void from_json(const nlohmann::json &j, Individual<DNA, f> &i) {
 // return ga.start();
 
 enum class SelectionMethod { paretoTournament, randomObjTournament };
-template <typename DNA, typename footprint_t = doubleMat> class GA {
+template <typename DNA, typename footprint_t = simpleVec> class GA {
+ public:
+	using Ind_t = Individual<DNA, footprint_t>;
+	using Iptr = Ind_t *;
+	using DNA_t = DNA;
+	using distanceMatrix_t = std::vector<std::vector<double>>;
+
 	GAGA_PROTECTED_TESTABLE :
 
 	    /*********************************************************************************
@@ -218,11 +233,14 @@ template <typename DNA, typename footprint_t = doubleMat> class GA {
 
 	// for novelty:
 	bool novelty = false;            // enable novelty
-	size_t KNN = 15;                 // size of the neighbourhood for novelty
+	std::vector<Ind_t> archive;      // when novelty is enabled, we store individuals there
+	size_t KNN = 5;                  // size of the neighbourhood for novelty
 	bool saveArchiveEnabled = true;  // save the novelty archive
 	size_t nbOfArchiveAdditionsPerGeneration = 5;
 	std::function<double(const footprint_t &, const footprint_t)> computeFootprintDistance =
 	    [](const auto &, const auto &) { return 0; };
+	std::function<distanceMatrix_t(const std::vector<Ind_t> &)> computeDistanceMatrix =
+	    [this](const auto &ar) { return this->defaultComputeDistanceMatrix(ar); };
 
 	// for speciation:
 	bool speciation = false;           // enable speciation
@@ -245,9 +263,6 @@ template <typename DNA, typename footprint_t = doubleMat> class GA {
 	 *                                 SETTERS
 	 ********************************************************************************/
  public:
-	using Ind_t = Individual<DNA, footprint_t>;
-	using Iptr = Ind_t *;
-	using DNA_t = DNA;
 	void enablePopulationSave() { savePopEnabled = true; }
 	void disablePopulationSave() { savePopEnabled = false; }
 	void enableArchiveSave() { saveArchiveEnabled = true; }
@@ -376,12 +391,7 @@ template <typename DNA, typename footprint_t = doubleMat> class GA {
 
 	GAGA_PROTECTED_TESTABLE :
 
-	    std::vector<Ind_t>
-	        archive;  // when novelty is enabled, we store random individuals
-	                  // there (cf. Devising Effective Novelty Search Algorithms:
-	                  // A Comprehensive Empirical Study)
-
-	size_t currentGeneration = 0;
+	    size_t currentGeneration = 0;
 	bool customInit = false;
 	int procId = 0;
 	int nbProcs = 1;
@@ -397,7 +407,6 @@ template <typename DNA, typename footprint_t = doubleMat> class GA {
 	auto defaultCrossover(const D &d1, const D &d2) -> decltype(d1.crossover(d2)) {
 		return d1.crossover(d2);
 	}
-
 	template <class D, class... SFINAE> D defaultCrossover(const D &d1, SFINAE...) {
 		printLn(2, "WARNING: no crossover method specified");
 		return d1;
@@ -471,6 +480,18 @@ template <typename DNA, typename footprint_t = doubleMat> class GA {
 			}
 		}
 		setPopulationId(population, currentGeneration);
+	}
+
+	template <typename... Args> void printError(Args &&... a) {
+		const size_t ERROR_VERBOSITY_LVL = 1;
+		printLn(ERROR_VERBOSITY_LVL, GAGA_COLOR_RED, "[ERROR] ", GAGA_COLOR_NORMAL,
+		        std::forward<Args>(a)...);
+	}
+
+	template <typename... Args> void printWarning(Args &&... a) {
+		const size_t WARNING_VERBOSITY_LVL = 2;
+		printLn(WARNING_VERBOSITY_LVL, GAGA_COLOR_YELLOW, "[WARNING] ", GAGA_COLOR_NORMAL,
+		        std::forward<Args>(a)...);
 	}
 
 	template <typename... Args> void printLn(size_t lvl, Args &&... a) {
@@ -572,11 +593,9 @@ template <typename DNA, typename footprint_t = doubleMat> class GA {
 		if (verbosity >= 3) cerr << "Next generation ready" << endl;
 	}
 
-
 	void setPopulationId(std::vector<Ind_t> &p, size_t genId) {
 		// reinitialize individuals' id to a pair {genId , 0 to N}
 		for (size_t i = 0; i < p.size(); ++i) p[i].id = std::make_pair(genId, i);
-
 	}
 
 	void speciationNextGen() {
@@ -896,8 +915,6 @@ template <typename DNA, typename footprint_t = doubleMat> class GA {
 		return nextGen;
 	}
 
-
-
 	// PARETO HELPERS
 
 	bool paretoDominates(const Ind_t &a, const Ind_t &b) const {
@@ -1034,116 +1051,85 @@ template <typename DNA, typename footprint_t = doubleMat> class GA {
 	// one or more snapshot taken at different points in the simulation (a
 	// std::vector<vector<double>>). Snapshot must be of same size accross individuals.
 	// Footprint must be set in the evaluator (see examples)
-	double getFootprintDistance(const footprint_t &f0, const footprint_t &f1) {
-		assert(f0.size() == f1.size());
-		double d = 0;
-		for (size_t i = 0; i < f0.size(); ++i) {
-			for (size_t j = 0; j < f0[i].size(); ++j) {
-				d += std::pow(f0[i][j] - f1[i][j], 2);
+
+	distanceMatrix_t defaultComputeDistanceMatrix(const std::vector<Ind_t> &ar) {
+		// this computes both dist(i,j) and dist(j,i), so they can be different.
+		distanceMatrix_t dmat(ar.size(), std::vector<double>(ar.size()));
+		for (size_t i = 0; i < ar.size(); ++i) {
+			for (size_t j = 0; j < ar.size(); ++j) {
+				if (i != j)
+					dmat[i][j] = computeFootprintDistance(ar[i].footprint, ar[j].footprint);
 			}
 		}
-		return sqrt(d);
+		return dmat;
 	}
 
-	// computeAvgDist (novelty related)
-	// returns the average distance of a footprint fp to its k nearest neighbours
-	// in an archive of footprints
-	double computeAvgDist(size_t K, const std::vector<Ind_t> &arch, const footprint_t &fp) {
-		double avgDist = 0;
-		if (arch.size() > 1) {
-			size_t k = arch.size() < K ? static_cast<size_t>(arch.size()) : K;
-			std::vector<Ind_t> knn;
-			knn.reserve(k);
-			std::vector<double> knnDist;
-			knnDist.reserve(k);
-			std::pair<double, size_t> worstKnn = {
-			    computeFootprintDistance(fp, arch[0].footprint),
-			    0};  // maxKnn is the worst among the knn
-			for (size_t i = 0; i < k; ++i) {
-				knn.push_back(arch[i]);
-				double d = computeFootprintDistance(fp, arch[i].footprint);
-				knnDist.push_back(d);
-				if (d > worstKnn.first) {
-					worstKnn = {d, i};
-				}
-			}
-			for (size_t i = k; i < arch.size(); ++i) {
-				double d = computeFootprintDistance(fp, arch[i].footprint);
-				if (d < worstKnn.first) {  // this one is closer than our worst knn
-					knn[worstKnn.second] = arch[i];
-					knnDist[worstKnn.second] = d;
-					worstKnn.first = d;
-					// we update maxKnn
-					for (size_t j = 0; j < knn.size(); ++j) {
-						if (knnDist[j] > worstKnn.first) {
-							worstKnn = {knnDist[j], j};
-						}
-					}
-				}
-			}
-			assert(knn.size() == k);
-			for (size_t i = 0; i < knn.size(); ++i) {
-				// assert(computeFootprintDistance(fp, knn[i].footprint) == knnDist[i]);
-				avgDist += knnDist[i];
-			}
-			avgDist /= static_cast<double>(knn.size());
-		}
-		return avgDist;
+	std::vector<size_t> findKNN(size_t i, size_t K, const distanceMatrix_t &dmat) {
+		// returns the K nearest neighbors of i, according to the distance matrix dmat
+		if (dmat.size() == 0) return std::vector<size_t>();
+		assert(dmat[i].size() == dmat.size());
+		assert(i < dmat.size());
+		const std::vector<double> &distances = dmat[i];
+		std::vector<size_t> indices(distances.size());
+		std::iota(indices.begin(), indices.end(), 0);
+
+		size_t k = std::max(std::min(K, distances.size() - 1), (size_t)0u);
+
+		std::nth_element(
+		    indices.begin(), indices.begin() + k, indices.end(),
+		    [&distances](size_t a, size_t b) { return distances[a] < distances[b]; });
+
+		indices.erase(std::remove(indices.begin(), indices.end(), i),
+		              indices.end());  // remove itself from the knn list
+		indices.resize(k);
+		return indices;
 	}
+
 	void updateNovelty() {
-		if (verbosity >= 2) {
-			cout << endl << endl;
-			std::stringstream output;
-			cout << GAGA_COLOR_GREY << " ❯❯  " << GAGA_COLOR_YELLOW << "COMPUTING NOVELTY "
-			     << GAGA_COLOR_NORMAL << " ⤵  " << endl
-			     << endl;
-		}
+		// we append the current population to the archive
 		auto savedArchiveSize = archive.size();
-		for (auto &ind : population) {
-			archive.push_back(ind);
-		}
-		std::pair<Ind_t *, double> best = {&population[0], 0};
-		std::vector<Ind_t> toBeAdded;
-		for (auto &ind : population) {
-			double avgD = computeAvgDist(KNN, archive, ind.footprint);
-			ind.fitnesses["novelty"] = avgD;
-			if (avgD > best.second) best = {&ind, avgD};
-			if (verbosity >= 2) {
-				std::stringstream output;
-				output << GAGA_COLOR_GREY << " ❯ " << endl
-				       << GAGA_COLOR_NORMAL << ind.infos << endl
-				       << " -> Novelty = " << GAGA_COLOR_CYAN << avgD << GAGA_COLOR_GREY
-				       << GAGA_COLOR_NORMAL;
-				if (verbosity >= 3)
-					output << "Footprint was : " << footprintToString(ind.footprint);
-				output << endl;
-				std::cout << output.str();
-			}
-		}
-		std::uniform_int_distribution<size_t> d(0, population.size() - 1);
-		for (size_t i = 0; i < nbOfArchiveAdditionsPerGeneration; ++i) {
-			toBeAdded.push_back(population[d(globalRand)]);
+		for (auto &ind : population) archive.push_back(ind);
+
+		// we compute the distance matrix.
+		// distanceMatrix[i][j] == distanceMatrix[j][i] == distance(archive[i], archive[j])
+		std::vector<std::vector<double>> distanceMatrix = computeDistanceMatrix(archive);
+
+		// then update the novelty field of every member of the population
+		for (size_t p_i = 0; p_i < population.size(); p_i++) {
+			size_t i = savedArchiveSize + p_i;  // individuals'id in the archive
+			assert(population[p_i].id == archive[i].id);
+
+			std::vector<size_t> knn = findKNN(i, KNN, distanceMatrix);
+
+			// sum = sum of distances between i and its knn
+			// novelty = avg dist to knn
+			double sum = 0;
+			for (auto &j : knn) sum += distanceMatrix[i][j];
+			population[p_i].fitnesses["novelty"] = sum / (double)knn.size();
+
+			printLn(2, "Novelty for ind ", population[p_i].id, " -> ",
+			        population[p_i].fitnesses["novelty"]);
+			printLn(3, "Ind ", population[p_i].id, " footprint is ",
+			        footprintToString(population[p_i].footprint));
 		}
 
+		// now we add random individuals to the archive
+		std::vector<Ind_t> toBeAdded;
+		std::uniform_int_distribution<size_t> d(0, population.size() - 1);
+		for (size_t i = 0; i < nbOfArchiveAdditionsPerGeneration; ++i)
+			toBeAdded.push_back(population[d(globalRand)]);
+
+		// first we erase the entire pop that we had appended to the archive
 		archive.erase(archive.begin() + static_cast<long>(savedArchiveSize), archive.end());
+		// then we add the newly selected individuals
 		archive.insert(std::end(archive), std::begin(toBeAdded), std::end(toBeAdded));
-		if (verbosity >= 2) {
-			std::stringstream output;
-			output << " Added " << toBeAdded.size() << " new footprints to the archive."
-			       << std::endl
-			       << "New archive size = " << archive.size() << " (was " << savedArchiveSize
-			       << ")." << std::endl;
-			std::cout << output.str() << std::endl;
-		}
-		if (verbosity >= 2) {
-			std::stringstream output;
-			output << "Most novel individual (novelty = " << best.second
-			       << "): " << best.first->infos << endl;
-			cout << output.str();
-		}
+		printLn(2, "Added ", toBeAdded.size(), " new individuals to the archive.");
+		printLn(2, "New archive size = ", archive.size());
+
+		// TODO: archive maintenance: allow to recompute every novelty score
+		// + maintain a certain size
 	}
 
-	// panpan cucul
 	template <typename T> static inline std::string footprintToString(const T &f) {
 		std::ostringstream res;
 		res << "👣  " << json(f).dump();
