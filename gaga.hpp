@@ -200,8 +200,9 @@ void from_json(const nlohmann::json &j, Individual<DNA, f> &i) {
 // return ga.start();
 
 enum class SelectionMethod { paretoTournament, randomObjTournament };
-template <typename DNA, typename footprint_t = simpleVec> class GA {
+template <typename DNA, typename Fp = simpleVec> class GA {
  public:
+	using footprint_t = Fp;
 	using Ind_t = Individual<DNA, footprint_t>;
 	using Iptr = Ind_t *;
 	using DNA_t = DNA;
@@ -351,6 +352,9 @@ template <typename DNA, typename footprint_t = simpleVec> class GA {
 	size_t getKNN() { return KNN; }
 	template <typename F> void setComputeFootprintDistanceFunction(F &&f) {
 		computeFootprintDistance = std::forward<F>(f);
+	}
+	template <typename F> void setComputDistanceMatrixFunction(F &&f) {
+		computeDistanceMatrix = std::forward<F>(f);
 	}
 
 	// for speciation:
@@ -1686,6 +1690,7 @@ template <typename DNA, typename footprint_t = simpleVec> class GA {
 		file << o.dump();
 		file.close();
 	}
+
 	void saveArchive() {
 		json o = Ind_t::popToJSON(archive);
 		o["evaluator"] = evaluatorName;

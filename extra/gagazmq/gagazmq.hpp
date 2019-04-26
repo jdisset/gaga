@@ -1,3 +1,4 @@
+#pragma once
 #include "../../gaga.hpp"
 #include "third_party/zmq.hpp"
 
@@ -116,9 +117,13 @@ template <typename GA_t> class ZMQWorker {
 
  public:
 	using ind_t = typename GA_t::Ind_t;
-	size_t batchSize = 2;
+	size_t evalBatchSize = 2;
+	size_t distanceBatchSize = 20;
 	bool debug = false;
 	std::function<void(ind_t&)> evaluate = [](ind_t&) {};
+	std::function<double(const typename GA_t::footprint_t&,
+	                     const typename GA_t::footprint_t&)>
+	    computeDistance;
 
 	ZMQWorker(std::string serverAddr)
 	    : addr(serverAddr), context(1), socket(context, ZMQ_REQ) {}
@@ -143,7 +148,9 @@ template <typename GA_t> class ZMQWorker {
 			// send the ready request
 			{
 				if (debug) std::cerr << "Sending READY" << std::endl;
-				nlohmann::json req_json = {{"req", "READY"}, {"qtty", batchSize}};
+				nlohmann::json req_json = {{"req", "READY"},
+				                           {"EVAL_batchSize", evalBatchSize},
+				                           {"DISTANCE_batchSize", distanceBatchSize}};
 				send(req_json);
 			}
 
@@ -154,6 +161,9 @@ template <typename GA_t> class ZMQWorker {
 				throw std::runtime_error(errMsg);
 			}
 			if (rep_json["req"] == "EVAL") {
+				// ----------------------------
+				//          EVAL REQ
+				// ----------------------------
 				if (debug) std::cerr << "received EVAL req" << std::endl;
 				// we evaluate all individuals
 				nlohmann::json evaluatedIndividuals = nlohmann::json::array();
@@ -163,13 +173,40 @@ template <typename GA_t> class ZMQWorker {
 					evaluatedIndividuals.push_back(ind.toJSON());
 				}
 				// send the results
-				{
-					nlohmann::json req_json = {{"req", "RESULT"},
-					                           {"individuals", evaluatedIndividuals}};
-					if (debug) std::cerr << "WORKER SENDING RESULTS" << std::endl;
-					send(req_json);
-				}
+				nlohmann::json req_json = {{"req", "RESULT"},
+				                           {"individuals", evaluatedIndividuals}};
+				send(req_json);
 				recvMessage(socket);  // ACK
+			} else if (rep_json["req"] == "DISTANCE") {
+				// ----------------------------
+				//        DISTANCE REQ
+				// ----------------------------
+				if (debug) std::cerr << "received DISTANCE req:" << std::endl;
+
+				// we get the footprint archive
+				std::vector<typename GA_t::footprint_t> archive;
+
+				for (auto& i : rep_json["extra"].at("archive")) {
+					archive.push_back(i.at("footprint").template get<typename GA_t::footprint_t>());
+				}
+
+				auto distanceResults = nlohmann::json::array();
+				// then we compute each distance
+				for (const auto& p : rep_json["tasks"]) {
+					// p is a pair of indices
+					nlohmann::json r = p;
+					assert(p.size() == 2);
+					assert(p[0] < archive.size());
+					assert(p[1] < archive.size());
+					// we add a third element: the distance
+					r.push_back(computeDistance(archive[p[0]], archive[p[1]]));
+					// and append everything to the distanceResults
+					distanceResults.push_back(r);
+				}
+				nlohmann::json req_json = {{"req", "RESULT"}, {"distances", distanceResults}};
+				send(req_json);
+				recvMessage(socket);  // ACK
+
 			} else if (rep_json["req"] == "STOP")
 				listening = false;
 			else {
@@ -213,7 +250,16 @@ template <typename GA_t> struct ZMQServer {
 	json extra{};  // the json extra is sent to the workers with each EVAL request
 
 	ZMQServer() : context(1), socket(context, ZMQ_ROUTER) {
-		ga.setEvaluateFunction([&]() { distributedEvaluate2(); });
+		ga.setEvaluateFunction([&]() { distributedEvaluate(); });
+	}
+
+	void enableDistributedDistanceMatrixComputation() {
+		ga.setComputDistanceMatrixFunction(
+		    [&](const auto& a) { return distributedComputeDistanceMatrix(a); });
+	}
+	void disableDistributedDistanceMatrixComputation() {
+		ga.setComputDistanceMatrixFunction(
+		    [&](const auto& a) { return distributedComputeDistanceMatrix(a); });
 	}
 
 	void setCompression(bool comp) {
@@ -228,7 +274,8 @@ template <typename GA_t> struct ZMQServer {
 	}
 
 	template <typename T, typename F>
-	void taskDispatch(std::string commandName, std::vector<T> tasks, F&& processResult) {
+	void taskDispatch(std::string commandName, std::vector<T> tasks, F&& processResult,
+	                  const nlohmann::json& extra = {}) {
 		// taks are going to be sent as an array named "tasks" in a request whose "req" value
 		// is commandName
 
@@ -242,8 +289,12 @@ template <typename GA_t> struct ZMQServer {
 					readyRequests.pop();
 					auto& req = request.second;  // req = the body of the request
 					size_t qtty = 1u;            // default size of task batch is 1
-					if (req.count("qtty"))       // a worker can ask for different size via qtty
-						qtty = std::min(tasks.size(), req.at("qtty").template get<size_t>());
+
+					// a worker can ask for different size via a commandName_batchSize field
+					std::string batchSizeField = commandName + "_batchSize";
+
+					if (req.count(batchSizeField))
+						qtty = std::min(tasks.size(), req.at(batchSizeField).template get<size_t>());
 
 					json taskArray = json::array();
 
@@ -252,11 +303,12 @@ template <typename GA_t> struct ZMQServer {
 						tasks.pop_back();
 					}
 
-					json rep = {{"req", commandName}, {"tasks", taskArray}};
-					ga.printLn(3, "Sending ", tasks.size(), " ", commandName, " tasks to ",
+					json rep = {{"req", commandName}, {"tasks", taskArray}, {"extra", extra}};
+
+					ga.printLn(3, taskArray.size(), " ", commandName, " tasks sent to ",
 					           request.first);
-					send(socket, request.first, rep);
-					workingWorkers.insert(request.first);  // add the worker's to the working list
+					send(socket, request.first, rep);      // send work
+					workingWorkers.insert(request.first);  // add worker to the workingWorkers list
 				} else {
 					auto request = recvRequest(socket);
 					auto& req = request.second;
@@ -267,7 +319,6 @@ template <typename GA_t> struct ZMQServer {
 						if (!workingWorkers.count(request.first)) {
 							ga.printWarning("An unknown worker just sent a result (worker = ",
 							                request.first, " ; req = ", req.dump(), ")");
-							// really, this shouldn't happen...
 						} else {
 							workingWorkers.erase(request.first);
 						}
@@ -291,7 +342,7 @@ template <typename GA_t> struct ZMQServer {
 		}
 	}
 
-	void distributedEvaluate2() {
+	void distributedEvaluate() {
 		std::vector<json> individualsToEvaluate;
 
 		for (size_t i = 0; i < ga.population.size(); ++i) {
@@ -327,21 +378,49 @@ template <typename GA_t> struct ZMQServer {
 		taskDispatch("EVAL", individualsToEvaluate, evalResults);
 	}
 
-	// distanceMap_t distributedComputeDistanceMap() {
-	//// TODO
-	//// in GAGA:
-	//// - change updateNovelty to first compute a distance map (pair of ind ->
-	/// distance)
-	//// before calling computeAvgDist
-	//// - the computeDistanceMap should be a lambda that takes an archive (vec of ind)
-	//// - change computeAvgDist to take distance map as argument (and stop directly
-	//// computing distances)
-	////
-	//// this function distributes unique pairs from the archive in defined chunk sizes.
-	//// Very similar to distributedEvaluate
-	// std::vector<signaturePair_t> signaturePairs;
-	// json j = {{"req", "DIST"}, {"pairs", signaturePairs}};
-	//	}
+	typename GA_t::distanceMatrix_t distributedComputeDistanceMatrix(
+	    const std::vector<typename GA_t::Ind_t>& ar) {
+		// assumes dist(a,b) == dist(b,a)
+
+		// the distance matrix, first filled with zeros.
+		typename GA_t::distanceMatrix_t dmat(ar.size(), std::vector<double>(ar.size()));
+
+		// tasks =  pairsr of archive id for which the workers should compute a distance
+		// TODO: keep track, over generations, of the already computed distances.
+		std::vector<json> distancePairs;
+		for (size_t i = 0; i < ar.size(); ++i) {
+			for (size_t j = i + 1; j < ar.size(); ++j) {
+				auto dpair = nlohmann::json::array();
+				dpair.push_back(i);
+				dpair.push_back(j);
+				distancePairs.push_back(dpair);
+			}
+		}
+
+		// we send the archive as extra content in the request, to each client.
+		auto archive_js = nlohmann::json::array();
+		for (const auto& i : ar) archive_js.push_back(i.toJSON());
+		json extra_js{{"archive", archive_js}};
+
+		// called whenever results are sent by a worker. We just update the distance matrix
+		auto distanceResults = [&ar, &dmat](const auto& req) {
+			auto distances = req.at("distances");
+			for (auto& d : distances) {  // d = [i, j, dist]
+				size_t i = d[0];
+				size_t j = d[1];
+				assert(i < ar.size());
+				assert(j < ar.size());
+				size_t dist = d[2];
+				dmat[i][j] = dist;
+				dmat[j][i] = dist;
+			}
+			return distances.size();
+		};
+
+		taskDispatch("DISTANCE", distancePairs, distanceResults, extra_js);
+
+		return dmat;
+	}
 
 	void terminate() {
 		ga.printLn(2, "Terminating server, sending STOP signal to all workers");

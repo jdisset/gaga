@@ -12,15 +12,25 @@ TEST_CASE("ZMQ") {
 
 	const bool COMPRESSION = true;
 
-	auto onemax = [](auto& ind) {
-		ind.fitnesses["sum"] =
-		    std::accumulate(ind.dna.values.begin(), ind.dna.values.end(), 0);
+	auto onemax = [](auto& i) {
+		// i.fitnesses["sum"] = std::accumulate(i.dna.values.begin(), i.dna.values.end(), 0);
+		i.footprint = std::vector<double>(i.dna.values.data(),
+		                                  i.dna.values.data() + i.dna.values.size());
+	};
+
+	auto euclidian = [](const auto& fpA, const auto& fpB) {
+		double sum = 0;
+		for (size_t i = 0; i < fpA.size(); ++i) sum += std::pow(fpA[i] - fpB[i], 2);
+		return sqrt(sum);
 	};
 
 	auto createWorker = [=](std::string addr) {
 		GAGA::ZMQWorker<GA_t> w(addr);
 		w.evaluate = onemax;
-		w.batchSize = 10;
+		w.computeDistance = euclidian;
+		w.evalBatchSize = 1;
+		w.distanceBatchSize = 10000;
+		w.debug = false;
 		w.setCompression(COMPRESSION);
 		w.start();
 	};
@@ -29,24 +39,22 @@ TEST_CASE("ZMQ") {
 	std::string serverAddr = "tcp://localhost:4321";
 
 	std::vector<std::thread> workers;
-
 	const int NWORKERS = 5;
-
-	for (int i = 0; i < NWORKERS; ++i) {
-		workers.emplace_back(createWorker, serverAddr);
-	}
+	for (int i = 0; i < NWORKERS; ++i) workers.emplace_back(createWorker, serverAddr);
 
 	GAGA::ZMQServer<GA_t> server;
 	server.setCompression(COMPRESSION);
+	server.enableDistributedDistanceMatrixComputation();
 	auto& ga = server.ga;
 	ga.setPopSize(50);
-	ga.setVerbosity(0);
-	server.bind(port);
-
+	ga.setVerbosity(2);
+	ga.enableNovelty();
 	ga.initPopulation([&]() { return dna_t::random(); });
-	for (size_t i = 0; i < 50; ++i) ga.step();
 
+	server.bind(port);
+	for (size_t i = 0; i < 50; ++i) ga.step();
 	server.terminate();
+
 	for (auto& w : workers) w.join();
 }
 
@@ -55,7 +63,7 @@ TEST_CASE("Novelty") {
 	using GA_t = GAGA::GA<dna_t>;
 
 	GA_t ga;
-	ga.setVerbosity(3);
+	ga.setVerbosity(0);
 	ga.enableNovelty();
 	ga.setEvaluator([](auto& i, int) {
 		i.footprint = std::vector<double>(i.dna.values.data(),

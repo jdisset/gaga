@@ -1,6 +1,7 @@
 #define GAGA_TESTING
 #define CATCH_CONFIG_MAIN
 
+#include "../extra/gagazmq/gagazmq.hpp"
 #include "../gaga.hpp"
 #include "catch/catch.hpp"
 #include "dna.hpp"
