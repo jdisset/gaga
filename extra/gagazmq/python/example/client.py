@@ -16,5 +16,5 @@ def euclidianDistance(x, y):
     b = np.array(y)
     return np.linalg.norm(a-b)
 
-worker = GAGAWorker("tcp://localhost:4321", evaluationFunc = maxSum, evalBatchSize = 2, distanceFunc = euclidianDistance, distanceBatchSize = 100000)
+worker = GAGAWorker("tcp://localhost:4321", evaluationFunc = maxSum, evalBatchSize = 2, distanceFunc = euclidianDistance, distanceBatchSize = 100000, compression = False)
 worker.start()

@@ -4,6 +4,7 @@ import random
 from random import randint
 import zmq
 import json
+import msgpack
 
 class GAGAWorker:
 
@@ -19,29 +20,42 @@ class GAGAWorker:
         self.socket.setsockopt_string(zmq.IDENTITY, self.identity)
         self.socket.connect(serverAddress)
 
+    def encodeMsg(self, msg):
+        if self.compression:
+            return msgpack.packb(msg)
+        else:
+            return bytes(json.dumps(msg), 'utf-8')
+
+    def decodeMsg(self, msg):
+        if self.compression:
+            return msgpack.unpackb(msg, raw=False)
+        else:
+            return json.loads(msg)
+
+
+
     def start(self):
         while True:
-            req = {'req':'READY', 'EVAL_batchSize':self.evalBatchSize, 'DISTANCE_batchSize':self.distanceBatchSize}
-            self.socket.send(bytes(json.dumps(req),'utf8'))
-            strRep = self.socket.recv()
-            rep = json.loads(strRep)
-            #print("sent READY request")
 
-            if rep['req'] == 'EVAL':
+            # send a READY request and wait for a reply
+            self.socket.send(self.encodeMsg({'req':'READY', 'EVAL_batchSize':self.evalBatchSize, 'DISTANCE_batchSize':self.distanceBatchSize}))
+            rep = self.decodeMsg(self.socket.recv())
+
+            if rep['req'] == 'EVAL': # Evaluation of individuals
                 dnaList = [i['dna'] for i in rep['tasks']]
                 results = self.evaluationFunc(rep['tasks'])
                 assert len(results) == len(rep['tasks'])
-                reply = {'req':'RESULT', 'individuals':results}
-                self.socket.send(bytes(json.dumps(reply), 'utf-8'))
+                reply = self.encodeMsg({'req':'RESULT', 'individuals':results})
+                self.socket.send(reply)
                 self.socket.recv() #ACK
 
-            elif rep['req'] == 'DISTANCE':
+            elif rep['req'] == 'DISTANCE': # Distance computations for novelty
                 footprints = [i['footprint'] for i in rep['extra']['archive']]
                 distances = [i for i in rep['tasks']]
                 #print('computing', len(distances), 'distances from', len(footprints), 'footprints')
                 distances = [[i[0],i[1],self.distanceFunc(footprints[i[0]], footprints[i[1]])] for i in distances]
-                reply = {'req':'RESULT', 'distances':distances}
-                self.socket.send(bytes(json.dumps(reply), 'utf-8'))
+                reply = self.encodeMsg({'req':'RESULT', 'distances':distances})
+                self.socket.send(reply)
                 self.socket.recv() #ACK
 
             elif rep['req'] == 'STOP':
