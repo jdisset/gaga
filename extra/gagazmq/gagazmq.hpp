@@ -361,7 +361,7 @@ template <typename GA_t> struct ZMQServer {
 			auto individuals = req.at("individuals");
 			for (auto& i : individuals) {
 				auto id = i.at("id").template get<std::pair<size_t, size_t>>();
-				assert(id.first == ga.currentGeneration);
+				assert(id.first == ga.getCurrentGenerationNumber());
 				ind_t ind(i);
 				// we only write fitnesses, footprint, infos and evalTime
 				assert(id.second == ga.population[id.second].id.second);
