@@ -3,3 +3,4 @@ tmp
 evos
 .DS_STORE
 *.gch*
+__pycache__
