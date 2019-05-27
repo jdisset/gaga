@@ -1,5 +1,5 @@
 // Gaga: lightweight simple genetic algorithm library
-// Copyright (c) Jean Disset 2018, All rights reserved.
+// Copyright (c) Jean Disset 2019, All rights reserved.
 
 // This library is free software; you can redistribute it and/or
 // modify it under the terms of the GNU Lesser General Public
@@ -14,6 +14,15 @@
 // You should have received a copy of the GNU Lesser General Public
 // License along with this library.
 
+/******************************************************************************************
+ *                                 GAGA LIBRARY
+ *****************************************************************************************/
+// This file contains :
+// 1 - the Individual class template : an individual's generic representation, with its
+// dna, fitnesses and behavior footprints (for novelty)
+// 2 - the main GA class template
+
+
 #ifndef GAMULTI_HPP
 #define GAMULTI_HPP
 
@@ -25,10 +34,10 @@
 #include <cstring>
 #include <deque>
 #include <fstream>
+#include <iomanip>
 #include <iostream>
 #include <map>
 #include <random>
-#include <iomanip>
 #include <sstream>
 #include <string>
 #include <unordered_map>
@@ -80,25 +89,29 @@ std::ostream &operator<<(std::ostream &out, const std::pair<T, U> &p) {
 	return out;
 }
 
-/******************************************************************************************
- *                                 GAGA LIBRARY
- *****************************************************************************************/
-// This file contains :
-// 1 - the Individual class template : an individual's generic representation, with its
-// dna, fitnesses and behavior footprints (for novelty)
-// 2 - the main GA class template
-
 /*****************************************************************************
  *                         INDIVIDUAL CLASS
  * **************************************************************************/
-// A valid DNA class must have (see examples folder):
-// DNA mutate()
-// DNA crossover(DNA& other)
-// static DNA random(int argc, char** argv)
-// json& constructor
-// void reset()
-// json toJson()
-
+// - wrapper for a dna
+// - stores fitness + footprint (for comparison during novelty search)
+// - stores varioous infos (stats, lineage, custom infos)
+//
+// **************************************************************************
+// A valid DNA class MUST have:
+// ----------------------------
+// string serialize() # MANDATORY
+// constructor from serialized string # MANDATORY
+//
+// A DNA class SHOULD have:
+// ------------------------
+// DNA mutate() # optional (but you won't do much without it)
+// DNA crossover(DNA& other) # optional for mutation only search
+//
+// A DNA class CAN have:
+// ---------------------
+// void reset() # if exists, will be used between each reuse of the same dna
+//
+// **************************************************************************
 template <typename DNA, typename F = simpleVec> struct Individual {
 	using footprint_t = F;
 
@@ -189,7 +202,7 @@ void from_json(const nlohmann::json &j, Individual<DNA, f> &i) {
  ********************************************************************************/
 // DNA requirements : see Individual class;
 //
-// Evaluaor class requirements (see examples folder):
+// Evaluator class requirements (see examples folder):
 // constructor(int argc, char** argv)
 // void operator()(const Ind_t& ind)
 // const string name
@@ -402,10 +415,11 @@ template <typename DNA, typename Fp = simpleVec> class GA {
 	int nbProcs = 1;
 
 	// default mutate and crossover are taken from the DNA_t class, if they are defined.
-	template <class D> auto defaultMutate(D &d) -> decltype(d.mutate()) { d.mutate(); }
-	template <class D, class... SFINAE> D defaultMutate(const D &d, SFINAE...) {
-		printLn(2, "WARNING: no mutate method specified");
-		return d;
+	template <class D> auto defaultMutate(D &d) -> decltype(d.mutate()) {
+		return d.mutate();
+	}
+	template <class D, class... SFINAE> void defaultMutate(D &d, SFINAE...) {
+		printLn(3, "WARNING: no mutate method specified");
 	}
 
 	template <class D>
@@ -413,8 +427,14 @@ template <typename DNA, typename Fp = simpleVec> class GA {
 		return d1.crossover(d2);
 	}
 	template <class D, class... SFINAE> D defaultCrossover(const D &d1, SFINAE...) {
-		printLn(2, "WARNING: no crossover method specified");
+		printLn(3, "WARNING: no crossover method specified");
 		return d1;
+	}
+
+	// default reset method taken from the DNA_t class, if defined.
+	template <class D> auto defaultReset(D &d) -> decltype(d.reset()) { return d.reset(); }
+	template <class D, class... SFINAE> void defaultReset(D &d, SFINAE...) {
+		printLn(3, "WARNING: no reset method specified");
 	}
 
 	// crossover and mutate are 2 lambdas that call defaultMutate and defaultCrossover. It
@@ -522,7 +542,7 @@ template <typename DNA, typename Fp = simpleVec> class GA {
 				if (evaluateAllIndividuals || !population[i].evaluated) {
 					printLn(3, "Going to evaluate ind ");
 					auto t0 = high_resolution_clock::now();
-					population[i].dna.reset();
+					defaultReset(population[i].dna);
 					evaluator(population[i], 0);
 					auto t1 = high_resolution_clock::now();
 					population[i].evaluated = true;
