@@ -1,3 +1,0 @@
-[submodule "gaga/tests/grgen"]
-	path = gaga/tests/grgen
-	url = https://github.com/jdisset/grgen.git
