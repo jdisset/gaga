@@ -42,7 +42,7 @@ class GAGAWorker:
             rep = self.decodeMsg(self.socket.recv())
 
             if rep['req'] == 'EVAL': # Evaluation of individuals
-                dnaList = [i['dna'] for i in rep['tasks']]
+                #dnaList = [i['dna'] for i in rep['tasks']]
                 results = self.evaluationFunc(rep['tasks'])
                 assert len(results) == len(rep['tasks'])
                 reply = self.encodeMsg({'req':'RESULT', 'individuals':results})

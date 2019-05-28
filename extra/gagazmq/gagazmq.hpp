@@ -275,7 +275,7 @@ template <typename GA_t> struct ZMQServer {
 
 	template <typename T, typename F>
 	void taskDispatch(std::string commandName, std::vector<T> tasks, F&& processResult,
-	                  const nlohmann::json& extra = {}) {
+	                  const nlohmann::json& taskExtra = {}) {
 		// taks are going to be sent as an array named "tasks" in a request whose "req" value
 		// is commandName
 
@@ -303,7 +303,10 @@ template <typename GA_t> struct ZMQServer {
 						tasks.pop_back();
 					}
 
-					json rep = {{"req", commandName}, {"tasks", taskArray}, {"extra", extra}};
+					auto combinedExtra = extra;
+					combinedExtra.update(taskExtra);
+					json rep = {
+					    {"req", commandName}, {"tasks", taskArray}, {"extra", combinedExtra}};
 
 					ga.printLn(3, taskArray.size(), " ", commandName, " tasks sent to ",
 					           request.first);
