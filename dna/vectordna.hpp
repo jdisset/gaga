@@ -3,7 +3,6 @@
 #include <vector>
 #include "../third_party/json.hpp"
 
-
 /**
  * @brief a configurable vector DNA with single point crossover and json serialization
  */
@@ -33,10 +32,8 @@ template <typename T> struct VectorDNA {
 
 	using json = nlohmann::json;
 	std::vector<T> values;
-	Config* cfg = nullptr;
 
 	VectorDNA() {}
-	explicit VectorDNA(Config* c) : cfg(c) {}
 
 	explicit VectorDNA(const std::string& s) {
 		auto o = json::parse(s);
@@ -51,12 +48,11 @@ template <typename T> struct VectorDNA {
 
 	void reset() {}
 
-	void mutate() {
-		assert(cfg);
+	inline void mutate(const Config& cfg) {
 		size_t action = 0;  // default = modify
-		if (cfg->mutateSize) {
+		if (cfg.mutateSize) {
 			action =
-			    chooseAction(std::vector<T>{{cfg->modifyProba, cfg->addProba, cfg->eraseProba}},
+			    chooseAction(std::vector<T>{{cfg.modifyProba, cfg.addProba, cfg.eraseProba}},
 			                 getRandomEngine());
 		}
 		std::uniform_real_distribution<T> d(0, 1);  // TODO replace by generic rand
@@ -79,12 +75,11 @@ template <typename T> struct VectorDNA {
 		}
 	}
 
-	static VectorDNA random(Config* c) {
-		assert(c);
-		VectorDNA res(c);
-		res.values.resize(c->initialSize);
+	static VectorDNA random(const Config& c) {
+		VectorDNA res;
+		res.values.resize(c.initialSize);
 		std::uniform_real_distribution<T> d(0, 1);  // TODO replace by generic rand
-		for (size_t i = 0; i < c->initialSize; ++i) res.values[i] = d(getRandomEngine());
+		for (size_t i = 0; i < c.initialSize; ++i) res.values[i] = d(getRandomEngine());
 		return res;
 	}
 
@@ -94,8 +89,7 @@ template <typename T> struct VectorDNA {
 	}
 
 	VectorDNA crossover(const VectorDNA& other) {  // fixed point crossover
-		assert((*(other.cfg)).to_json() == (*cfg).to_json());
-		VectorDNA res(cfg);
+		VectorDNA res;
 		for (size_t i = 0; i < values.size() / 2; ++i) res.values.push_back(values[i]);
 		for (size_t i = other.values.size() / 2; i < other.values.size(); ++i)
 			res.values.push_back(other.values[i]);
