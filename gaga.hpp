@@ -22,7 +22,6 @@
 // dna, fitnesses and behavior footprints (for novelty)
 // 2 - the main GA class template
 
-
 #ifndef GAMULTI_HPP
 #define GAMULTI_HPP
 
@@ -1376,6 +1375,8 @@ template <typename DNA, typename Fp = simpleVec> class GA {
 		else
 			output << "\n";
 		if ((!novelty && verbosity >= 2) || verbosity >= 3) output << ind.infos << std::endl;
+		if (novelty && verbosity >= 2)
+			output << footprintToString(ind.footprint) << std::endl;
 		std::cout << output.str();
 	}
 

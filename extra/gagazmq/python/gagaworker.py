@@ -38,12 +38,14 @@ class GAGAWorker:
         while True:
 
             # send a READY request and wait for a reply
+            print("sending ready");
             self.socket.send(self.encodeMsg({'req':'READY', 'EVAL_batchSize':self.evalBatchSize, 'DISTANCE_batchSize':self.distanceBatchSize}))
             rep = self.decodeMsg(self.socket.recv())
+            print("received");
 
             if rep['req'] == 'EVAL': # Evaluation of individuals
                 #dnaList = [i['dna'] for i in rep['tasks']]
-                results = self.evaluationFunc(rep['tasks'])
+                results = self.evaluationFunc(rep['tasks'], rep['extra'])
                 assert len(results) == len(rep['tasks'])
                 reply = self.encodeMsg({'req':'RESULT', 'individuals':results})
                 self.socket.send(reply)
@@ -52,8 +54,9 @@ class GAGAWorker:
             elif rep['req'] == 'DISTANCE': # Distance computations for novelty
                 footprints = [i['footprint'] for i in rep['extra']['archive']]
                 distances = [i for i in rep['tasks']]
-                #print('computing', len(distances), 'distances from', len(footprints), 'footprints')
+                print('computing', len(distances), 'distances from', len(footprints), 'footprints')
                 distances = [[i[0],i[1],self.distanceFunc(footprints[i[0]], footprints[i[1]])] for i in distances]
+                print('distances = ', distances)
                 reply = self.encodeMsg({'req':'RESULT', 'distances':distances})
                 self.socket.send(reply)
                 self.socket.recv() #ACK

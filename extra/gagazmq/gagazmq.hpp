@@ -304,7 +304,7 @@ template <typename GA_t> struct ZMQServer {
 					}
 
 					auto combinedExtra = extra;
-					combinedExtra.update(taskExtra);
+					if (!taskExtra.empty()) combinedExtra.update(taskExtra);
 					json rep = {
 					    {"req", commandName}, {"tasks", taskArray}, {"extra", combinedExtra}};
 
@@ -406,14 +406,14 @@ template <typename GA_t> struct ZMQServer {
 		json extra_js{{"archive", archive_js}};
 
 		// called whenever results are sent by a worker. We just update the distance matrix
-		auto distanceResults = [&ar, &dmat](const auto& req) {
+		auto distanceResults = [this, &ar, &dmat](const auto& req) {
 			auto distances = req.at("distances");
 			for (auto& d : distances) {  // d = [i, j, dist]
 				size_t i = d[0];
 				size_t j = d[1];
 				assert(i < ar.size());
 				assert(j < ar.size());
-				size_t dist = d[2];
+				double dist = d[2];
 				dmat[i][j] = dist;
 				dmat[j][i] = dist;
 			}
@@ -422,6 +422,7 @@ template <typename GA_t> struct ZMQServer {
 
 		taskDispatch("DISTANCE", distancePairs, distanceResults, extra_js);
 
+		ga.printLn(3, "Distance Matrix = ", nlohmann::json(dmat).dump());
 		return dmat;
 	}
 
