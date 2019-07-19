@@ -370,6 +370,10 @@ template <typename DNA, typename Fp = simpleVec> class GA {
 		computeDistanceMatrix = std::forward<F>(f);
 	}
 
+	void setNbOfArchiveAdditionsPerGeneration(size_t n) {
+		nbOfArchiveAdditionsPerGeneration = n;
+	}
+
 	// for speciation:
 	void enableSpeciation() {
 		nextGeneration = [this]() { speciationNextGen(); };
