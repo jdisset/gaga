@@ -32,11 +32,8 @@ class GAGAWorker:
         else:
             return json.loads(msg)
 
-
-
     def start(self):
         while True:
-
             # send a READY request and wait for a reply
             print("sending ready");
             self.socket.send(self.encodeMsg({'req':'READY', 'EVAL_batchSize':self.evalBatchSize, 'DISTANCE_batchSize':self.distanceBatchSize}))
@@ -67,5 +64,3 @@ class GAGAWorker:
 
             else :
                 print("[WARNING] Received unknown request:",strRep.decode('utf-8'))
-
-

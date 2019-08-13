@@ -185,6 +185,7 @@ template <typename GA_t> class ZMQWorker {
 
 				// we get the footprint archive
 				std::vector<typename GA_t::footprint_t> archive;
+				archive.reserve(rep_json["extra"].at("archive").size());
 
 				for (auto& i : rep_json["extra"].at("archive")) {
 					archive.push_back(i.at("footprint").template get<typename GA_t::footprint_t>());
@@ -296,12 +297,13 @@ template <typename GA_t> struct ZMQServer {
 					if (req.count(batchSizeField))
 						qtty = std::min(tasks.size(), req.at(batchSizeField).template get<size_t>());
 
-					json taskArray = json::array();
-
+					std::vector<T> taskarray_raw;
+					taskarray_raw.reserve(qtty);
 					for (size_t i = 0; i < qtty; ++i) {
-						taskArray.push_back(tasks.back());
+						taskarray_raw.push_back(tasks.back());
 						tasks.pop_back();
 					}
+					json taskArray(taskarray_raw);
 
 					auto combinedExtra = extra;
 					if (!taskExtra.empty()) combinedExtra.update(taskExtra);
@@ -381,22 +383,51 @@ template <typename GA_t> struct ZMQServer {
 		taskDispatch("EVAL", individualsToEvaluate, evalResults);
 	}
 
+	//----------------------------------------------------------------------------
+	// distributedComputeDistanceMatrix
+	//----------------------------------------------------------------------------
+	// Computes the distance matrix while avoinding unecessary new recomputations
+	//---   ---   ---   ---   ---   ---   ---   ---   ---   ---   ---   ---   ---
+	// We assume individuals with same id don't change between generations, and that the
+	// distance between 2 old inds is stable over time. The top left part of the matrix
+	// until the first new individual wont be recomputed. To use that, gaga should always
+	// try to append new individuals at the end of the archive vector.
+	
+	std::vector<typename GA_t::Ind_t> prevArchive;
+	typename GA_t::distanceMatrix_t prevDistanceMat;
+
 	typename GA_t::distanceMatrix_t distributedComputeDistanceMatrix(
 	    const std::vector<typename GA_t::Ind_t>& ar) {
-		// assumes dist(a,b) == dist(b,a)
-
 		// the distance matrix, first filled with zeros.
 		typename GA_t::distanceMatrix_t dmat(ar.size(), std::vector<double>(ar.size()));
 
-		// tasks =  pairsr of archive id for which the workers should compute a distance
-		// TODO: keep track, over generations, of the already computed distances.
-		std::vector<json> distancePairs;
-		for (size_t i = 0; i < ar.size(); ++i) {
+		// finding the id of the first new individual (before which we don't need to
+		// recompute distances)
+		size_t firstNewId = 0;
+		for (size_t i = 0; i < ar.size() && i < prevArchive.size(); ++i) {
+			if (ar[i].id == prevArchive[i].id)
+				firstNewId = i;
+			else
+				break;
+		}
+
+		ga.printLn(3, "We already know ", firstNewId, " distances");
+
+		// we fill the new distmatrix with the distances we already know
+		for (size_t i = 0; i < firstNewId; ++i) {
+			for (size_t j = 0; j < firstNewId; ++j) {
+				const auto& d = prevDistanceMat[i][j];
+				dmat[i][j] = d;
+				dmat[j][i] = d;
+			}
+		}
+
+		// tasks = pairs of ar id for which the workers should compute a distance
+		std::vector<std::pair<size_t, size_t>> distancePairs;
+		distancePairs.reserve(0.5 * std::pow(ar.size() - firstNewId, 2));
+		for (size_t i = firstNewId; i < ar.size(); ++i) {
 			for (size_t j = i + 1; j < ar.size(); ++j) {
-				auto dpair = nlohmann::json::array();
-				dpair.push_back(i);
-				dpair.push_back(j);
-				distancePairs.push_back(dpair);
+				distancePairs.emplace_back(i, j);
 			}
 		}
 
@@ -405,12 +436,13 @@ template <typename GA_t> struct ZMQServer {
 		for (const auto& i : ar) archive_js.push_back(i.toJSON());
 		json extra_js{{"archive", archive_js}};
 
-		// called whenever results are sent by a worker. We just update the distance matrix
+		// called whenever results are sent by a worker. We just update the distance
+		// matrix
 		auto distanceResults = [this, &ar, &dmat](const auto& req) {
 			auto distances = req.at("distances");
 			for (auto& d : distances) {  // d = [i, j, dist]
-				size_t i = d[0];
-				size_t j = d[1];
+				const size_t& i = d[0];
+				const size_t& j = d[1];
 				assert(i < ar.size());
 				assert(j < ar.size());
 				double dist = d[2];
@@ -421,6 +453,9 @@ template <typename GA_t> struct ZMQServer {
 		};
 
 		taskDispatch("DISTANCE", distancePairs, distanceResults, extra_js);
+
+		prevDistanceMat = dmat;
+		prevArchive = ar;
 
 		ga.printLn(3, "Distance Matrix = ", nlohmann::json(dmat).dump());
 		return dmat;

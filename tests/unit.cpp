@@ -5,9 +5,6 @@
 #include "../gaga.hpp"
 #include "catch/catch.hpp"
 #include "dna.hpp"
-#include "grgen/classic.hpp"
-#include "grgen/common.h"
-#include "grgen/grn.hpp"
 #include "gagazmq_tests.hpp"
 
 template <typename T> void initGA() {
@@ -37,6 +34,48 @@ TEST_CASE("Population is initialized ok, individuals are improving", "[populatio
 	initGA<IntDNA>();
 }
 
+TEST_CASE("Pareto") {
+	const int N = 50;
+	GAGA::GA<IntDNA> ga;
+	ga.setPopSize(N);
+	ga.setVerbosity(0);
+	int i = 0;
+	ga.initPopulation([&]() {
+		IntDNA d;
+		d.value = i++;
+		return d;
+	});
+	ga.setMutationRate(0);
+	ga.setCrossoverRate(0);
+	ga.setEvaluator([](auto &i, int) {
+		i.fitnesses["value"] = i.dna.value;
+		i.fitnesses["other"] = N - i.dna.value;
+	});
+
+	ga.evaluate();
+
+	std::vector<typename GAGA::GA<IntDNA>::Ind_t *> indPtr;
+	for (auto &i : ga.population) indPtr.push_back(&i);
+
+	for (size_t i = 0; i < ga.population.size() - 1; ++i) {
+		REQUIRE(ga.paretoDominates(ga.population[i + 1], ga.population[i], {{"value"}}));
+		REQUIRE(!ga.paretoDominates(ga.population[i], ga.population[i + 1], {{"value"}}));
+
+		REQUIRE(ga.paretoDominates(ga.population[i], ga.population[i + 1], {{"other"}}));
+		REQUIRE(!ga.paretoDominates(ga.population[i + 1], ga.population[i], {{"other"}}));
+
+		REQUIRE(ga.getParetoRank(indPtr, i, {{"other"}}) == i + 1);
+		REQUIRE(ga.getParetoRank(indPtr, i, {{"value"}}) == N - i);
+
+		std::unordered_set<std::string> objs;
+		objs.insert("other");
+		objs.insert("value");
+		REQUIRE(!ga.paretoDominates(ga.population[i + 1], ga.population[i], objs));
+		REQUIRE(!ga.paretoDominates(ga.population[i], ga.population[i + 1], objs));
+		REQUIRE(ga.getParetoRank(indPtr, i, objs) == 1);
+	}
+}
+
 void helpersMethods() {
 	const int N = 50;
 	GAGA::GA<IntDNA> ga;
@@ -61,13 +100,15 @@ void helpersMethods() {
 	ga.evaluate();
 
 	// Produce N Offsprings
-	auto offsprings = ga.produceNOffsprings(2, ga.population);
+	auto offsprings =
+	    ga.produceNOffsprings(2, ga.population, 0, ga.getAllObjectives(ga.population[0]));
 	REQUIRE(offsprings.size() == 2);
 	std::vector<GAGA::Individual<IntDNA> *> indPointers;
 	for (size_t i = 0; i < ga.population.size(); ++i) {
 		indPointers.push_back(&ga.population[i]);
 	}
-	auto newOffsprings = ga.produceNOffsprings(2, indPointers);
+	auto newOffsprings =
+	    ga.produceNOffsprings(2, indPointers, 0, ga.getAllObjectives(ga.population[0]));
 	REQUIRE(newOffsprings.size() == 2);
 
 	// ELITISM
@@ -105,31 +146,3 @@ void helpersMethods() {
 }
 
 TEST_CASE("Helpers methods ok", "[methods]") { helpersMethods(); }
-
-template <typename T> void GRNGA() {
-	GAGA::GA<T> ga;
-	size_t popsize = 100;
-	ga.setVerbosity(0);
-	ga.setNbThreads(10);
-	ga.setEvaluator([](auto &i, int) {
-		i.fitnesses["length"] = i.dna.getProteinSize(ProteinType::regul);
-	});
-	REQUIRE((ga.population.size() == 0));
-	ga.setPopSize(popsize);
-	vector<GAGA::Individual<T>> pop;
-	for (size_t i = 0; i < popsize; ++i) {
-		T t;
-		t.config.ADD_RATE = 1.0;
-		t.config.DEL_RATE = 0.0;
-		t.config.MODIF_RATE = 0.0;
-		t.addRandomProtein(ProteinType::input, "input");
-		t.addRandomProtein(ProteinType::output, "output");
-		t.randomReguls(1);
-		t.randomParams();
-		pop.push_back(GAGA::Individual<T>(t));
-	}
-	ga.setPopulation(pop);
-	ga.step(5);
-	REQUIRE(ga.population.size() == popsize);
-}
-TEST_CASE("Test with GRGEN GRN", "[population]") { GRNGA<GRN<Classic>>(); }

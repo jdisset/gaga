@@ -47,7 +47,7 @@ TEST_CASE("ZMQ") {
 	server.enableDistributedDistanceMatrixComputation();
 	auto& ga = server.ga;
 	ga.setPopSize(50);
-	ga.setVerbosity(2);
+	ga.setVerbosity(0);
 	ga.enableNovelty();
 	ga.initPopulation([&]() { return dna_t::random(); });
 

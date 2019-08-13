@@ -113,6 +113,7 @@ std::ostream &operator<<(std::ostream &out, const std::pair<T, U> &p) {
 // **************************************************************************
 template <typename DNA, typename F = simpleVec> struct Individual {
 	using footprint_t = F;
+	using id_t = std::pair<size_t, size_t>;
 
 	DNA dna;
 
@@ -122,7 +123,7 @@ template <typename DNA, typename F = simpleVec> struct Individual {
 	bool evaluated = false;
 	bool wasAlreadyEvaluated = false;
 	double evalTime = 0.0;
-	std::pair<size_t, size_t> id{0u, 0u};  // gen id , ind id
+	id_t id{0u, 0u};  // gen id , ind id
 
 	std::string infos;  // custom infos, description, whatever... filled by user
 	std::map<string, double> stats;  // custom stats, filled by user
@@ -231,7 +232,7 @@ template <typename DNA, typename Fp = simpleVec> class GA {
 	size_t popSize = 500;                 // nb of individuals in the population
 	size_t nbElites = 1;                  // nb of elites to keep accross generations
 	size_t nbSavedElites = 1;             // nb of elites to save
-	size_t tournamentSize = 3;            // nb of competitors in tournament
+	size_t tournamentSize = 5;            // nb of competitors in tournament
 	bool savePopEnabled = true;           // save the whole population
 	unsigned int savePopInterval = 1;     // interval between 2 whole population saves
 	unsigned int saveGenInterval = 1;     // interval between 2 elites/pareto saves
@@ -247,6 +248,7 @@ template <typename DNA, typename Fp = simpleVec> class GA {
 
 	// for novelty:
 	bool novelty = false;            // enable novelty
+	bool nslc = false;               // enable noverlty search with local competition
 	std::vector<Ind_t> archive;      // when novelty is enabled, we store individuals there
 	size_t KNN = 5;                  // size of the neighbourhood for novelty
 	bool saveArchiveEnabled = true;  // save the novelty archive
@@ -337,13 +339,18 @@ template <typename DNA, typename Fp = simpleVec> class GA {
 	void setIsBetterMethod(std::function<bool(double, double)> f) { isBetter = f; }
 	void setSelectionMethod(const SelectionMethod &sm) { selecMethod = sm; }
 
-	template <typename S> std::function<Iptr(S &)> getSelectionMethod() {
+	using objList_t = std::unordered_set<std::string>;
+	template <typename S> std::function<Iptr(S &, const objList_t &)> getSelectionMethod() {
 		switch (selecMethod) {
 			case SelectionMethod::paretoTournament:
-				return [this](S &subPop) { return paretoTournament(subPop); };
+				return [this](S &subPop, const objList_t &objectives) {
+					return paretoTournament(subPop, objectives);
+				};
 			case SelectionMethod::randomObjTournament:
 			default:
-				return [this](S &subPop) { return randomObjTournament(subPop); };
+				return [this](S &subPop, const objList_t &objectives) {
+					return randomObjTournament(subPop, objectives);
+				};
 		}
 	}
 
@@ -605,16 +612,33 @@ template <typename DNA, typename Fp = simpleVec> class GA {
 		}
 	}
 
+	// helper that returns the unordered list of all objectives currently in an individual
+	template <typename I>
+	static std::unordered_set<std::string> getAllObjectives(const I &i) {
+		std::unordered_set<std::string> objs;
+		for (const auto &o : i.fitnesses) objs.insert(o.first);
+		return objs;
+	}
 	/*********************************************************************************
 	 *                            NEXT POP GETTING READY
 	 ********************************************************************************/
 	void classicNextGen() {
+		assert(population.size() > 0);
 		// simple next generation routine:
 		// 1 - evaluation (wih obj + novelty fitnesses)
 		// 2 - selection with mutations/crossovers
 		evaluate();
-		if (novelty) updateNovelty();
-		auto nextGen = produceNOffsprings(popSize, population, nbElites);
+		if (novelty) {
+			updateNovelty();
+		}
+		std::unordered_set<std::string> objectives;
+		if (novelty && nslc) {
+			objectives.insert("novelty");
+			objectives.insert("local_score");
+		} else {
+			objectives = getAllObjectives(population[0]);
+		}
+		auto nextGen = produceNOffsprings(popSize, population, nbElites, objectives);
 		previousGenerations.push_back(population);
 		population = nextGen;
 		setPopulationId(population, currentGeneration + 1);
@@ -636,7 +660,7 @@ template <typename DNA, typename Fp = simpleVec> class GA {
 		// (création d'une nouvelle espèce si distance < speciationThreshold)
 		// - on supprime les espèces de taille < minSpecieSize
 		// - on rajoute des individus en les faisant muter depuis une espèce aléatoire
-		// (nouvelle espèce à chaque tirage) et en les rajoutants à cerre espèce
+		// (nouvelle espèce à chaque tirage) et en les rajoutants à cette espèce
 		// - c'est reparti :D
 
 		// TODO : for now it only works with maximization
@@ -644,6 +668,13 @@ template <typename DNA, typename Fp = simpleVec> class GA {
 		// and in the worstFitness computations
 
 		evaluate();
+		if (novelty) updateNovelty();
+		std::unordered_set<std::string> objectives;
+		if (novelty && nslc) {
+			objectives = {{"novelty", "local_score"}};
+		} else {
+			objectives = getAllObjectives(population[0]);
+		}
 
 		if (verbosity >= 3) cerr << "Starting to prepare next speciated gen" << std::endl;
 		assert(nbElites < minSpecieSize);
@@ -719,6 +750,7 @@ template <typename DNA, typename Fp = simpleVec> class GA {
 
 				nOffsprings = std::max(static_cast<size_t>(nOffsprings), 1ul);
 				nextGen.reserve(nextGen.size() + nOffsprings);
+
 				auto specieOffsprings = produceNOffsprings(nOffsprings, s, nbElites);
 				nextGen.insert(nextGen.end(), std::make_move_iterator(specieOffsprings.begin()),
 				               std::make_move_iterator(specieOffsprings.end()));
@@ -881,9 +913,11 @@ template <typename DNA, typename Fp = simpleVec> class GA {
 	}
 
 	template <typename I>  // I is ither Ind_t or Ind_t*
-	std::vector<Ind_t> produceNOffsprings(size_t n, std::vector<I> &popu,
-	                                      size_t nElites = 0) {
+	std::vector<Ind_t> produceNOffsprings(
+	    size_t n, std::vector<I> &popu, size_t nElites,
+	    const std::unordered_set<std::string> objectives) {
 		assert(popu.size() >= nElites);
+		assert(objectives.size() > 0);
 		if (verbosity >= 3)
 			cerr << "Going to produce " << n << " offsprings out of " << popu.size()
 			     << " individuals" << endl;
@@ -915,7 +949,8 @@ template <typename DNA, typename Fp = simpleVec> class GA {
 		std::vector<std::future<void>> futures;
 		for (size_t i = s; i < nCross + s; ++i) {
 			futures.push_back(tp.push([&]() {
-				auto offspring = crossoverIndividual(*selection(popu), *selection(popu));
+				auto offspring = crossoverIndividual(*selection(popu, objectives),
+				                                     *selection(popu, objectives));
 				std::lock_guard<std::mutex> thread_lock(nextGenMutex);
 				nextGen.push_back(offspring);
 			}));
@@ -923,7 +958,7 @@ template <typename DNA, typename Fp = simpleVec> class GA {
 
 		for (size_t i = nCross + s; i < nMut + nCross + s; ++i) {
 			futures.push_back(tp.push([&]() {
-				auto ind = mutatedIndividual(*selection(popu));
+				auto ind = mutatedIndividual(*selection(popu, objectives));
 				std::lock_guard<std::mutex> thread_lock(nextGenMutex);
 				nextGen.push_back(ind);
 			}));
@@ -932,7 +967,7 @@ template <typename DNA, typename Fp = simpleVec> class GA {
 		for (auto &f : futures) f.get();
 
 		while (nextGen.size() < n) {
-			auto i = *selection(popu);
+			auto i = *selection(popu, objectives);
 			i.parents.clear();
 			i.parents.push_back(i.id);
 			i.inheritanceType = "copy";
@@ -945,28 +980,71 @@ template <typename DNA, typename Fp = simpleVec> class GA {
 
 	// PARETO HELPERS
 
-	bool paretoDominates(const Ind_t &a, const Ind_t &b) const {
-		for (auto &o : a.fitnesses) {
-			if (!isBetter(o.second, b.fitnesses.at(o.first))) return false;
+	bool paretoDominates(const Ind_t &a, const Ind_t &b,
+	                     const std::unordered_set<std::string> &objectives) const {
+		for (const auto &o : objectives) {
+			assert(a.fitnesses.count(o));
+			assert(b.fitnesses.count(o));
+			if (!isBetter(a.fitnesses.at(o), b.fitnesses.at(o))) return false;
 		}
 		return true;
 	}
 
+	size_t getParetoRank(const std::vector<Ind_t *> &inds, size_t i,
+	                     const std::unordered_set<std::string> &objectives) {
+		return getParetoRank_recursiveImpl(inds, inds[i], objectives, 0);
+	}
+	size_t getParetoRank_recursiveImpl(const std::vector<Ind_t *> &inds, Ind_t *i,
+	                                   const std::unordered_set<std::string> &objectives,
+	                                   size_t d) {
+		if (std::find(inds.begin(), inds.end(), i) == inds.end()) {
+			return d;
+		} else
+			return getParetoRank_recursiveImpl(removeParetoFront(inds, objectives), i,
+			                                   objectives, d + 1);
+	}
+
+	std::vector<Ind_t *> removeParetoFront(
+	    const std::vector<Ind_t *> &ind,
+	    const std::unordered_set<std::string> &objectives) const {
+		// removes the pareto front and returns the rest
+		auto paretoFront = getParetoFront(ind, objectives);
+		std::vector<Ind_t *> res;
+		res.reserve(ind.size() - paretoFront.size());
+		for (auto i : ind) {
+			if (std::find(paretoFront.begin(), paretoFront.end(), i) ==
+			    paretoFront.end())  // not in pareto front
+				res.push_back(i);
+		}
+		return res;
+	}
+
 	std::vector<Ind_t *> getParetoFront(const std::vector<Ind_t *> &ind) const {
+		assert(ind.size() > 0);
+		std::unordered_set<std::string> objs;
+		for (const auto &o : ind[0]->fitnesses) objs.insert(o.first);
+		return getParetoFront(ind, objs);
+	}
+
+	std::vector<Ind_t *> getParetoFront(
+	    const std::vector<Ind_t *> &ind,
+	    const std::unordered_set<std::string> &objectives) const {
 		// naive algorithm. Should be ok for small ind.size()
 		assert(ind.size() > 0);
 		std::vector<Ind_t *> pareto;
 		for (size_t i = 0; i < ind.size(); ++i) {
 			bool dominated = false;
 			for (auto &j : pareto) {
-				if (paretoDominates(*j, *ind[i])) {
+				// is i dominated by any individual already on the pareto front?
+				if (paretoDominates(*j, *ind[i], objectives)) {
 					dominated = true;
 					break;
 				}
 			}
 			if (!dominated) {
 				for (size_t j = i + 1; j < ind.size(); ++j) {
-					if (paretoDominates(*ind[j], *ind[i])) {
+					// or by any other point ?
+					if (paretoDominates(*ind[j], *ind[i], objectives)) {
 						dominated = true;
 						break;
 					}
@@ -979,20 +1057,26 @@ template <typename DNA, typename Fp = simpleVec> class GA {
 		return pareto;
 	}
 
-	template <typename I> Ind_t *paretoTournament(std::vector<I> &subPop) {
+	template <typename I>
+	Ind_t *paretoTournament(std::vector<I> &subPop,
+	                        const std::unordered_set<std::string> &objectives) {
 		assert(subPop.size() > 0);
+		assert(objectives.size() > 0);
 		std::uniform_int_distribution<size_t> dint(0, subPop.size() - 1);
 		std::vector<Ind_t *> participants;
 		for (size_t i = 0; i < tournamentSize; ++i)
 			participants.push_back(&ref(subPop[dint(globalRand)]));
-		auto pf = getParetoFront(participants);
+		auto pf = getParetoFront(participants, objectives);
 		assert(pf.size() > 0);
 		std::uniform_int_distribution<size_t> dpf(0, pf.size() - 1);
 		return pf[dpf(globalRand)];
 	}
 
-	template <typename I> Ind_t *randomObjTournament(std::vector<I> &subPop) {
+	template <typename I>
+	Ind_t *randomObjTournament(std::vector<I> &subPop,
+	                           const std::unordered_set<std::string> &objectives) {
 		assert(subPop.size() > 0);
+		assert(objectives.size() > 0);
 		if (verbosity >= 3) cerr << "random obj tournament called" << endl;
 		std::uniform_int_distribution<size_t> dint(0, subPop.size() - 1);
 		std::vector<Ind_t *> participants;
@@ -1001,16 +1085,16 @@ template <typename DNA, typename Fp = simpleVec> class GA {
 		auto champion = participants[0];
 		// we pick the objective randomly
 		std::string obj;
-		if (champion->fitnesses.size() == 1) {
-			obj = champion->fitnesses.begin()->first;
+		if (objectives.size() == 1) {
+			obj = *(objectives.begin());
 		} else {
-			std::uniform_int_distribution<int> dObj(
-			    0, static_cast<int>(champion->fitnesses.size()) - 1);
-			auto it = champion->fitnesses.begin();
+			std::uniform_int_distribution<int> dObj(0, static_cast<int>(objectives.size()) - 1);
+			auto it = objectives.begin();
 			std::advance(it, dObj(globalRand));
-			obj = it->first;
+			obj = *it;
 		}
 		for (size_t i = 1; i < tournamentSize; ++i) {
+			assert(participants[i]->fitnesses.count(obj));
 			if (isBetter(participants[i]->fitnesses.at(obj), champion->fitnesses.at(obj)))
 				champion = participants[i];
 		}
@@ -1079,6 +1163,9 @@ template <typename DNA, typename Fp = simpleVec> class GA {
 	// one or more snapshot taken at different points in the simulation (a
 	// std::vector<vector<double>>). Snapshot must be of same size accross individuals.
 	// Footprint must be set in the evaluator (see examples)
+	// Options for novelty:
+	//  - Local Competition:
+	//
 
 	distanceMatrix_t defaultComputeDistanceMatrix(const std::vector<Ind_t> &ar) {
 		// this computes both dist(i,j) and dist(j,i), so they can be different.
@@ -1128,6 +1215,14 @@ template <typename DNA, typename Fp = simpleVec> class GA {
 			assert(population[p_i].id == archive[i].id);
 
 			std::vector<size_t> knn = findKNN(i, KNN, distanceMatrix);
+			if (nslc) {
+				// TODO
+				// local competition is enabled
+				double localRank = knn.size();
+				for (auto k : knn) {
+					// if (archive[k].fitnesses[""]) }
+				}
+			}
 
 			// sum = sum of distances between i and its knn
 			// novelty = avg dist to knn
