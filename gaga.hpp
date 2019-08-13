@@ -1216,12 +1216,22 @@ template <typename DNA, typename Fp = simpleVec> class GA {
 
 			std::vector<size_t> knn = findKNN(i, KNN, distanceMatrix);
 			if (nslc) {
-				// TODO
 				// local competition is enabled
-				double localRank = knn.size();
-				for (auto k : knn) {
-					// if (archive[k].fitnesses[""]) }
-				}
+
+				// we put all objectives other than novelty into objs
+				auto objs = getAllObjectives(population[p_i]);
+				if (objs.count("novelty")) objs.erase("novelty");
+				if (objs.count("local_score")) objs.erase("local_score");
+
+				std::vector<Ind_t *> knnPtr;  // pointers to knn individuals
+				for (auto k : knn) knnPtr.push_back(&archive[k]);
+				knnPtr.push_back(&archive[i]);  // + itself
+
+				// we normalize the rank
+				double knnSize = knn.size() > 0 ? static_cast<double>(knn.size()) : 1.0;
+				double localScore =
+				    static_cast<double>(getParetoRank(knnPtr, knnPtr.size(), objs)) / knnSize;
+				population[p_i].fitnesses["local_score"] = 1.0 - localScore;
 			}
 
 			// sum = sum of distances between i and its knn
