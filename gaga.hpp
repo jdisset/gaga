@@ -2,6 +2,7 @@
 // Copyright (c) Jean Disset 2019, All rights reserved.
 
 // This library is free software; you can redistribute it and/or
+//
 // modify it under the terms of the GNU Lesser General Public
 // License as published by the Free Software Foundation; either
 // version 3.0 of the License, or (at your option) any later version.
@@ -19,7 +20,7 @@
  *****************************************************************************************/
 // This file contains :
 // 1 - the Individual class template : an individual's generic representation, with its
-// dna, fitnesses and behavior footprints (for novelty)
+// dna, fitnesses and other infos
 // 2 - the main GA class template
 
 #ifndef GAMULTI_HPP
@@ -76,7 +77,6 @@ using std::endl;
 using std::string;
 using std::unordered_map;
 using std::unordered_set;
-using simpleVec = std::vector<double>;  // footprints for novelty
 using json = nlohmann::json;
 using std::chrono::high_resolution_clock;
 using std::chrono::milliseconds;
@@ -92,8 +92,8 @@ std::ostream &operator<<(std::ostream &out, const std::pair<T, U> &p) {
  *                         INDIVIDUAL CLASS
  * **************************************************************************/
 // - wrapper for a dna
-// - stores fitness + footprint (for comparison during novelty search)
-// - stores varioous infos (stats, lineage, custom infos)
+// - stores fitness
+// - stores various infos (stats, lineage, custom infos)
 //
 // **************************************************************************
 // A valid DNA class MUST have:
@@ -111,15 +111,13 @@ std::ostream &operator<<(std::ostream &out, const std::pair<T, U> &p) {
 // void reset() # if exists, will be used between each reuse of the same dna
 //
 // **************************************************************************
-template <typename DNA, typename F = simpleVec> struct Individual {
-	using footprint_t = F;
+template <typename DNA> struct Individual {
 	using id_t = std::pair<size_t, size_t>;
 
 	DNA dna;
 
 	std::map<std::string, double>
-	    fitnesses;          // std::map {"fitnessCriterName" -> "fitnessValue"}
-	footprint_t footprint;  // individual's footprint for novelty computation
+	    fitnesses;  // std::map {"fitnessCriterName" -> "fitnessValue"}
 	bool evaluated = false;
 	bool wasAlreadyEvaluated = false;
 	double evalTime = 0.0;
@@ -139,7 +137,6 @@ template <typename DNA, typename F = simpleVec> struct Individual {
 	explicit Individual(const json &o) {
 		assert(o.count("dna"));
 		dna = DNA(o.at("dna").get<std::string>());
-		if (o.count("footprint")) footprint = o.at("footprint").get<footprint_t>();
 		if (o.count("fitnesses")) fitnesses = o.at("fitnesses").get<decltype(fitnesses)>();
 		if (o.count("infos")) infos = o.at("infos");
 		if (o.count("evaluated")) evaluated = o.at("evaluated");
@@ -156,7 +153,6 @@ template <typename DNA, typename F = simpleVec> struct Individual {
 		json o;
 		o["dna"] = dna.serialize();
 		o["fitnesses"] = fitnesses;
-		o["footprint"] = footprint;
 		o["infos"] = infos;
 		o["evaluated"] = evaluated;
 		o["alreadyEval"] = wasAlreadyEvaluated;
@@ -169,7 +165,7 @@ template <typename DNA, typename F = simpleVec> struct Individual {
 	}
 
 	// Exports a std::vector of individual to json
-	static json popToJSON(const std::vector<Individual<DNA, footprint_t>> &p) {
+	template <typename Ind_t> static json popToJSON(const std::vector<Ind_t> &p) {
 		json o;
 		json popArray;
 		for (auto &i : p) popArray.push_back(i.toJSON());
@@ -178,23 +174,21 @@ template <typename DNA, typename F = simpleVec> struct Individual {
 	}
 
 	// Loads a std::vector of individual from json
-	static std::vector<Individual<DNA, footprint_t>> loadPopFromJSON(const json &o) {
+	template <typename Ind_t> static std::vector<Ind_t> loadPopFromJSON(const json &o) {
 		assert(o.count("population"));
-		std::vector<Individual<DNA, footprint_t>> res;
+		std::vector<Ind_t> res;
 		json popArray = o.at("population");
-		for (auto &ind : popArray) res.push_back(Individual<DNA, footprint_t>(ind));
+		for (auto &ind : popArray) res.push_back(Ind_t(ind));
 		return res;
 	}
 };
 
-template <typename DNA, typename f>
-void to_json(nlohmann::json &j, const Individual<DNA, f> &i) {
+template <typename DNA, typename Ind> void to_json(nlohmann::json &j, const Ind &i) {
 	j = i.toJSON();
 }
 
-template <typename DNA, typename f>
-void from_json(const nlohmann::json &j, Individual<DNA, f> &i) {
-	i = Individual<DNA, f>(j);
+template <typename DNA, typename Ind> void from_json(const nlohmann::json &j, Ind &i) {
+	i = Ind(j);
 }
 
 /*********************************************************************************
@@ -214,13 +208,11 @@ void from_json(const nlohmann::json &j, Individual<DNA, f> &i) {
 // return ga.start();
 
 enum class SelectionMethod { paretoTournament, randomObjTournament };
-template <typename DNA, typename Fp = simpleVec> class GA {
+template <typename DNA, typename Ind = Individual<DNA>> class GA {
  public:
-	using footprint_t = Fp;
-	using Ind_t = Individual<DNA, footprint_t>;
+	using Ind_t = Ind;
 	using Iptr = Ind_t *;
 	using DNA_t = DNA;
-	using distanceMatrix_t = std::vector<std::vector<double>>;
 
 	GAGA_PROTECTED_TESTABLE :
 
@@ -245,19 +237,6 @@ template <typename DNA, typename Fp = simpleVec> class GA {
 	bool doSaveGenStats = true;           // save generations stats to csv file
 	bool doSaveIndStats = false;          // save individuals stats to csv file
 	SelectionMethod selecMethod = SelectionMethod::paretoTournament;
-
-	// for novelty:
-	bool novelty = false;            // enable novelty
-	bool nslc = false;               // enable noverlty search with local competition
-	std::vector<Ind_t> archive;      // when novelty is enabled, we store individuals there
-	size_t KNN = 5;                  // size of the neighbourhood for novelty
-	bool saveArchiveEnabled = true;  // save the novelty archive
-	size_t nbOfArchiveAdditionsPerGeneration = 5;
-	std::function<double(const footprint_t &, const footprint_t)> computeFootprintDistance =
-	    [](const auto &, const auto &) { return 0; };
-	std::function<distanceMatrix_t(const std::vector<Ind_t> &)> computeDistanceMatrix =
-	    [this](const auto &ar) { return this->defaultComputeDistanceMatrix(ar); };
-
 	// for speciation:
 	bool speciation = false;           // enable speciation
 	double speciationThreshold = 0.2;  // min distance between two dna of same specie
@@ -265,9 +244,8 @@ template <typename DNA, typename Fp = simpleVec> class GA {
 	double minSpeciationThreshold = 0.03;
 	double maxSpeciationThreshold = 0.5;
 	double speciationThresholdIncrement = 0.01;
-	std::function<double(const Individual<DNA, footprint_t> &,
-	                     const Individual<DNA, footprint_t> &)>
-	    indDistanceFunction = [](const auto &, const auto &) { return 0.0; };
+	std::function<double(const Ind_t &, const Ind_t &)> indDistanceFunction =
+	    [](const auto &, const auto &) { return 0.0; };
 	const unsigned int MAX_SPECIATION_TRIES = 100;
 	std::vector<double> speciationThresholds;  // spec thresholds per specie
 
@@ -280,20 +258,17 @@ template <typename DNA, typename Fp = simpleVec> class GA {
 	 ********************************************************************************/
  public:
 	void enablePopulationSave() { savePopEnabled = true; }
-	void disablePopulationSave() { savePopEnabled = false; }
-	void enableArchiveSave() { saveArchiveEnabled = true; }
-	void disableArchiveSave() { saveArchiveEnabled = false; }
-	const std::vector<Ind_t> &getArchive() const { return archive; }
 	void setVerbosity(unsigned int lvl) { verbosity = lvl <= 3 ? (lvl >= 0 ? lvl : 0) : 3; }
 	void setPopSize(size_t s) { popSize = s; }
-	size_t getPopSize() { return popSize; }
+	size_t getPopSize() const { return popSize; }
 	void setNbElites(size_t n) { nbElites = n; }
-	size_t getNbElites() { return nbElites; }
+	size_t getNbElites() const { return nbElites; }
 	void setNbSavedElites(size_t n) { nbSavedElites = n; }
 	void setTournamentSize(size_t n) { tournamentSize = n; }
 	void setPopSaveInterval(unsigned int n) { savePopInterval = n; }
 	void setGenSaveInterval(unsigned int n) { saveGenInterval = n; }
-	void setSaveFolder(string s) { folder = s; }
+	void setSaveFolder(std::string s) { folder = s; }
+	std::string getSaveFolder() const { return folder; }
 	void setNbThreads(unsigned int n) {
 		if (n >= nbThreads)
 			tp.add_threads(n - nbThreads);
@@ -305,10 +280,10 @@ template <typename DNA, typename Fp = simpleVec> class GA {
 	void setCrossoverRate(double p) {
 		crossoverRate = p <= 1.0 ? (p >= 0.0 ? p : 0.0) : 1.0;
 	}
-	double getCrossoverRate() { return crossoverRate; }
+	double getCrossoverRate() const { return crossoverRate; }
 	void setMutationRate(double p) { mutationRate = p <= 1.0 ? (p >= 0.0 ? p : 0.0) : 1.0; }
-	int getVerbosity() { return verbosity; }
-	double getMutationRate() { return mutationRate; }
+	int getVerbosity() const { return verbosity; }
+	double getMutationRate() const { return mutationRate; }
 	void setEvaluator(std::function<void(Ind_t &, int)> e,
 	                  std::string ename = "anonymousEvaluator") {
 		evaluator = e;
@@ -318,6 +293,7 @@ template <typename DNA, typename Fp = simpleVec> class GA {
 			i.wasAlreadyEvaluated = false;
 		}
 	}
+	std::string getEvaluatorName() const { return evaluatorName; }
 
 	void setMutateMethod(std::function<void(DNA_t &)> m) { mutate = m; }
 	void setCrossoverMethod(std::function<DNA_t(const DNA_t &, const DNA_t &)> m) {
@@ -364,23 +340,6 @@ template <typename DNA, typename Fp = simpleVec> class GA {
 	std::vector<Ind_t> population;  // current population
 	std::vector<std::vector<Ind_t>> previousGenerations;
 
-	// for novelty:
-	void enableNovelty() { novelty = true; }
-	void disableNovelty() { novelty = false; }
-	bool noveltyEnabled() const { return novelty; }
-	void setKNN(size_t n) { KNN = n; }
-	size_t getKNN() { return KNN; }
-	template <typename F> void setComputeFootprintDistanceFunction(F &&f) {
-		computeFootprintDistance = std::forward<F>(f);
-	}
-	template <typename F> void setComputDistanceMatrixFunction(F &&f) {
-		computeDistanceMatrix = std::forward<F>(f);
-	}
-
-	void setNbOfArchiveAdditionsPerGeneration(size_t n) {
-		nbOfArchiveAdditionsPerGeneration = n;
-	}
-
 	// for speciation:
 	void enableSpeciation() {
 		nextGeneration = [this]() { speciationNextGen(); };
@@ -414,8 +373,11 @@ template <typename DNA, typename Fp = simpleVec> class GA {
 
 	////////////////////////////////////////////////////////////////////////////////////
 
-	std::random_device rd;
-	std::default_random_engine globalRand = std::default_random_engine(rd());
+	static std::mt19937_64 &globalRand() {
+		std::random_device rd;
+		static std::mt19937_64 r(rd());
+		return r;
+	};
 
 	GAGA_PROTECTED_TESTABLE :
 
@@ -428,7 +390,7 @@ template <typename DNA, typename Fp = simpleVec> class GA {
 	template <class D> auto defaultMutate(D &d) -> decltype(d.mutate()) {
 		return d.mutate();
 	}
-	template <class D, class... SFINAE> void defaultMutate(D &d, SFINAE...) {
+	template <class D, class... SFINAE> void defaultMutate(D &, SFINAE...) {
 		printLn(3, "WARNING: no mutate method specified");
 	}
 
@@ -443,7 +405,7 @@ template <typename DNA, typename Fp = simpleVec> class GA {
 
 	// default reset method taken from the DNA_t class, if defined.
 	template <class D> auto defaultReset(D &d) -> decltype(d.reset()) { return d.reset(); }
-	template <class D, class... SFINAE> void defaultReset(D &d, SFINAE...) {
+	template <class D, class... SFINAE> void defaultReset(D &, SFINAE...) {
 		printLn(3, "WARNING: no reset method specified");
 	}
 
@@ -486,15 +448,56 @@ template <typename DNA, typename Fp = simpleVec> class GA {
 	template <typename T> inline const T &ref(const T &obj) { return obj; }
 	template <typename T> inline const T &ref(const T *obj) { return *obj; }
 
+	// HOOKS (for extensions)
+	// pre / post Evaluation
+	std::vector<std::function<void(GA &)>> preEvaluation_hooks;
+	std::vector<std::function<void(GA &)>> postEvaluation_hooks;
+	// enabled objectives
+	std::vector<std::function<void(GA &, std::unordered_set<std::string> &)>>
+	    enabledObjectives_hooks;
+	// save pop
+	std::vector<std::function<void(GA &)>> savePop_hooks;
+	// printStart : prints stuff at startup
+	std::vector<std::function<void(const GA &)>> printStart_hooks;
+	// printIndividual: prints stuff for each individual, usually after eval
+	std::vector<std::function<std::string(const GA &, const Ind_t &)>>
+	    printIndividual_hooks;
+
+	// register an extension with this method:
+
+	void evaluation() {
+		for (auto &f : preEvaluation_hooks) f(*this);
+		evaluate();
+		for (auto &f : postEvaluation_hooks) f(*this);
+	}
+
  public:
 	/*********************************************************************************
 	 *                              CONSTRUCTOR
 	 ********************************************************************************/
 	GA() {}
 
-	/*********************************************************************************
-	 *                          START THE BOUZIN
-	 ********************************************************************************/
+	// EXTENSIONS & HOOKS
+	template <typename E> void useExtension(E &e) { e.onRegister(*this); }
+	template <typename H> void addPreEvaluationMethod(const H &&h) {
+		preEvaluation_hooks.emplace_back(h);
+	}
+	template <typename H> void addPostEvaluationMethod(const H &&h) {
+		postEvaluation_hooks.emplace_back(h);
+	}
+	template <typename H> void addEnabledObjectivesMethod(const H &&h) {
+		enabledObjectives_hooks.emplace_back(h);
+	}
+	template <typename H> void addSavePopMethod(const H &&h) {
+		savePop_hooks.emplace_back(h);
+	}
+	template <typename H> void addPrintStartMethod(const H &&h) {
+		printStart_hooks.emplace_back(h);
+	}
+	template <typename H> void addPrintIndividualMethod(const H &&h) {
+		printIndividual_hooks.emplace_back(h);
+	}
+
 	void setPopulation(const std::vector<Ind_t> &p) {
 		if (procId == 0) {
 			population = p;
@@ -588,7 +591,7 @@ template <typename DNA, typename Fp = simpleVec> class GA {
 				auto tnp0 = high_resolution_clock::now();
 				if (savePopInterval > 0 && currentGeneration % savePopInterval == 0) {
 					if (savePopEnabled) savePop();
-					if (novelty && saveArchiveEnabled) saveArchive();
+					for (auto &f : savePop_hooks) f(*this);
 				}
 				if (saveGenInterval > 0 && currentGeneration % saveGenInterval == 0) {
 					if (doSaveParetoFront) {
@@ -625,20 +628,19 @@ template <typename DNA, typename Fp = simpleVec> class GA {
 	void classicNextGen() {
 		assert(population.size() > 0);
 		// simple next generation routine:
-		// 1 - evaluation (wih obj + novelty fitnesses)
+		//
+		// 1 - evaluation
+		evaluation();
+
 		// 2 - selection with mutations/crossovers
-		evaluate();
-		if (novelty) {
-			updateNovelty();
-		}
-		std::unordered_set<std::string> objectives;
-		if (novelty && nslc) {
-			objectives.insert("novelty");
-			objectives.insert("local_score");
-		} else {
-			objectives = getAllObjectives(population[0]);
-		}
+		//
+		// pick which objectives should be used for selection
+		// (default = all, can be changed by extensions)
+		auto objectives = getAllObjectives(population[0]);
+		for (auto &f : enabledObjectives_hooks) f(*this, objectives);  // hook
+		// create next generation
 		auto nextGen = produceNOffsprings(popSize, population, nbElites, objectives);
+		// save old gen, next gen becomes current one,.
 		previousGenerations.push_back(population);
 		population = nextGen;
 		setPopulationId(population, currentGeneration + 1);
@@ -667,14 +669,10 @@ template <typename DNA, typename Fp = simpleVec> class GA {
 		// minimization would require a modification in the nOffsprings
 		// and in the worstFitness computations
 
-		evaluate();
-		if (novelty) updateNovelty();
-		std::unordered_set<std::string> objectives;
-		if (novelty && nslc) {
-			objectives = {{"novelty", "local_score"}};
-		} else {
-			objectives = getAllObjectives(population[0]);
-		}
+		evaluation();
+
+		auto objectives = getAllObjectives(population[0]);
+		for (auto &f : enabledObjectives_hooks) f(*this, objectives);  // hook
 
 		if (verbosity >= 3) cerr << "Starting to prepare next speciated gen" << std::endl;
 		assert(nbElites < minSpecieSize);
@@ -696,7 +694,7 @@ template <typename DNA, typename Fp = simpleVec> class GA {
 		for (auto &s : species) {
 			assert(s.size() > 0);
 			std::uniform_int_distribution<size_t> d(0, s.size() - 1);
-			nextLeaders.push_back(*s[d(globalRand)]);
+			nextLeaders.push_back(*s[d(globalRand())]);
 		}
 		if (verbosity >= 3)
 			cerr << "Found " << nextLeaders.size() << " leaders :" << std::endl;
@@ -767,15 +765,14 @@ template <typename DNA, typename Fp = simpleVec> class GA {
 		// correcting rounding errors by adding missing individuals
 		while (population.size() < popSize) {  // we just add mutated leaders
 			std::uniform_int_distribution<size_t> d(0, nextLeaders.size() - 1);
-			population.push_back(mutatiedIndividual(nextLeaders[d(globalRand)]));
+			population.push_back(mutatiedIndividual(nextLeaders[d(globalRand())]));
 		}
 		while (population.size() > popSize) population.pop_back();  // or delete the extra
 
 		assert(population.size() == popSize);
 
 		// reevaluating the new guys
-		evaluate();
-		if (novelty) updateNovelty();
+		evaluation();
 
 		// creating new species
 		species.clear();
@@ -867,7 +864,7 @@ template <typename DNA, typename Fp = simpleVec> class GA {
 				// individuals until the new ind can fit
 				auto selection = getSelectionMethod<std::vector<Iptr>>();
 				std::uniform_int_distribution<size_t> d(0, nextLeaders.size() - 1);
-				size_t leaderID = d(globalRand);
+				size_t leaderID = d(globalRand());
 				unsigned int c = 0;
 				do {
 					if (c++ > MAX_SPECIATION_TRIES)
@@ -1065,11 +1062,11 @@ template <typename DNA, typename Fp = simpleVec> class GA {
 		std::uniform_int_distribution<size_t> dint(0, subPop.size() - 1);
 		std::vector<Ind_t *> participants;
 		for (size_t i = 0; i < tournamentSize; ++i)
-			participants.push_back(&ref(subPop[dint(globalRand)]));
+			participants.push_back(&ref(subPop[dint(globalRand())]));
 		auto pf = getParetoFront(participants, objectives);
 		assert(pf.size() > 0);
 		std::uniform_int_distribution<size_t> dpf(0, pf.size() - 1);
-		return pf[dpf(globalRand)];
+		return pf[dpf(globalRand())];
 	}
 
 	template <typename I>
@@ -1081,7 +1078,7 @@ template <typename DNA, typename Fp = simpleVec> class GA {
 		std::uniform_int_distribution<size_t> dint(0, subPop.size() - 1);
 		std::vector<Ind_t *> participants;
 		for (size_t i = 0; i < tournamentSize; ++i)
-			participants.push_back(&ref(subPop[dint(globalRand)]));
+			participants.push_back(&ref(subPop[dint(globalRand())]));
 		auto champion = participants[0];
 		// we pick the objective randomly
 		std::string obj;
@@ -1090,7 +1087,7 @@ template <typename DNA, typename Fp = simpleVec> class GA {
 		} else {
 			std::uniform_int_distribution<int> dObj(0, static_cast<int>(objectives.size()) - 1);
 			auto it = objectives.begin();
-			std::advance(it, dObj(globalRand));
+			std::advance(it, dObj(globalRand()));
 			obj = *it;
 		}
 		for (size_t i = 1; i < tournamentSize; ++i) {
@@ -1152,133 +1149,6 @@ template <typename DNA, typename Fp = simpleVec> class GA {
 		}
 		return elites;
 	}
-
-	/*********************************************************************************
-	 *                          NOVELTY RELATED METHODS
-	 ********************************************************************************/
-	// Novelty works with footprints. A footprint is just a std::vector of std::vector of
-	// doubles. It is recommended that those doubles are within a same order of magnitude.
-	// Each std::vector<double> is a "snapshot": it represents the state of the evaluation
-	// of one individual at a certain time. Thus, a complete footprint is a combination of
-	// one or more snapshot taken at different points in the simulation (a
-	// std::vector<vector<double>>). Snapshot must be of same size accross individuals.
-	// Footprint must be set in the evaluator (see examples)
-	// Options for novelty:
-	//  - Local Competition:
-	//
-
-	distanceMatrix_t defaultComputeDistanceMatrix(const std::vector<Ind_t> &ar) {
-		// this computes both dist(i,j) and dist(j,i), so they can be different.
-		distanceMatrix_t dmat(ar.size(), std::vector<double>(ar.size()));
-		for (size_t i = 0; i < ar.size(); ++i) {
-			for (size_t j = 0; j < ar.size(); ++j) {
-				if (i != j)
-					dmat[i][j] = computeFootprintDistance(ar[i].footprint, ar[j].footprint);
-			}
-		}
-		return dmat;
-	}
-
-	std::vector<size_t> findKNN(size_t i, size_t K, const distanceMatrix_t &dmat) {
-		// returns the K nearest neighbors of i, according to the distance matrix dmat
-		if (dmat.size() == 0) return std::vector<size_t>();
-		assert(dmat[i].size() == dmat.size());
-		assert(i < dmat.size());
-		const std::vector<double> &distances = dmat[i];
-		std::vector<size_t> indices(distances.size());
-		std::iota(indices.begin(), indices.end(), 0);
-
-		size_t k = std::max(std::min(K, distances.size() - 1), (size_t)0u);
-
-		std::nth_element(
-		    indices.begin(), indices.begin() + k, indices.end(),
-		    [&distances](size_t a, size_t b) { return distances[a] < distances[b]; });
-
-		indices.erase(std::remove(indices.begin(), indices.end(), i),
-		              indices.end());  // remove itself from the knn list
-		indices.resize(k);
-		return indices;
-	}
-
-	void updateNovelty() {
-		// we append the current population to the archive
-		auto savedArchiveSize = archive.size();
-		for (auto &ind : population) archive.push_back(ind);
-
-		// we compute the distance matrix.
-		// distanceMatrix[i][j] == distanceMatrix[j][i] == distance(archive[i], archive[j])
-		std::vector<std::vector<double>> distanceMatrix = computeDistanceMatrix(archive);
-
-		// then update the novelty field of every member of the population
-		for (size_t p_i = 0; p_i < population.size(); p_i++) {
-			size_t i = savedArchiveSize + p_i;  // individuals'id in the archive
-			assert(population[p_i].id == archive[i].id);
-
-			std::vector<size_t> knn = findKNN(i, KNN, distanceMatrix);
-			if (nslc) {
-				// local competition is enabled
-
-				// we put all objectives other than novelty into objs
-				auto objs = getAllObjectives(population[p_i]);
-				if (objs.count("novelty")) objs.erase("novelty");
-				if (objs.count("local_score")) objs.erase("local_score");
-
-				std::vector<Ind_t *> knnPtr;  // pointers to knn individuals
-				for (auto k : knn) knnPtr.push_back(&archive[k]);
-				knnPtr.push_back(&archive[i]);  // + itself
-
-				// we normalize the rank
-				double knnSize = knn.size() > 0 ? static_cast<double>(knn.size()) : 1.0;
-				double localScore =
-				    static_cast<double>(getParetoRank(knnPtr, knnPtr.size(), objs)) / knnSize;
-				population[p_i].fitnesses["local_score"] = 1.0 - localScore;
-			}
-
-			// sum = sum of distances between i and its knn
-			// novelty = avg dist to knn
-			double sum = 0;
-			for (auto &j : knn) sum += distanceMatrix[i][j];
-			population[p_i].fitnesses["novelty"] = sum / (double)knn.size();
-
-			printLn(2, "Novelty for ind ", population[p_i].id, " -> ",
-			        population[p_i].fitnesses["novelty"]);
-			printLn(3, "Ind ", population[p_i].id, " footprint is ",
-			        footprintToString(population[p_i].footprint));
-		}
-
-		// now we add random individuals to the archive
-		std::vector<Ind_t> toBeAdded;
-		std::uniform_int_distribution<size_t> d(0, population.size() - 1);
-		for (size_t i = 0; i < nbOfArchiveAdditionsPerGeneration; ++i)
-			toBeAdded.push_back(population[d(globalRand)]);
-
-		// first we erase the entire pop that we had appended to the archive
-		archive.erase(archive.begin() + static_cast<long>(savedArchiveSize), archive.end());
-		// then we add the newly selected individuals
-		archive.insert(std::end(archive), std::begin(toBeAdded), std::end(toBeAdded));
-		printLn(2, "Added ", toBeAdded.size(), " new individuals to the archive.");
-		printLn(2, "New archive size = ", archive.size());
-
-		// TODO: archive maintenance: allow to recompute every novelty score
-		// + maintain a certain size
-	}
-
-	template <typename T> static inline std::string footprintToString(const T &f) {
-		std::ostringstream res;
-		res << "👣  " << json(f).dump();
-		return res.str();
-	}
-
-	string selectMethodToString(const SelectionMethod &sm) {
-		switch (sm) {
-			case SelectionMethod::paretoTournament:
-				return "pareto tournament";
-			case SelectionMethod::randomObjTournament:
-				return "random objective tournament";
-		}
-		return "???";
-	}
-
 	/*********************************************************************************
 	 *                           STATS, LOGS & PRINTING
 	 ********************************************************************************/
@@ -1308,15 +1178,6 @@ template <typename DNA, typename Fp = simpleVec> class GA {
 		          << GAGA_COLOR_NORMAL << std::endl;
 		std::cout << "  ▹ writing results in " << GAGA_COLOR_BLUE << folder
 		          << GAGA_COLOR_NORMAL << std::endl;
-		if (novelty) {
-			std::cout << "  ▹ novelty is " << GAGA_COLOR_GREEN << "enabled" << GAGA_COLOR_NORMAL
-			          << std::endl;
-			std::cout << "    - KNN size = " << GAGA_COLOR_BLUE << KNN << GAGA_COLOR_NORMAL
-			          << std::endl;
-		} else {
-			std::cout << "  ▹ novelty is " << GAGA_COLOR_RED << "disabled" << GAGA_COLOR_NORMAL
-			          << std::endl;
-		}
 		if (speciation) {
 			std::cout << "  ▹ speciation is " << GAGA_COLOR_GREEN << "enabled"
 			          << GAGA_COLOR_NORMAL << std::endl;
@@ -1334,6 +1195,9 @@ template <typename DNA, typename Fp = simpleVec> class GA {
 			std::cout << "  ▹ speciation is " << GAGA_COLOR_RED << "disabled"
 			          << GAGA_COLOR_NORMAL << std::endl;
 		}
+		for (int i = 0; i < nbCol - 1; ++i) std::cout << "━";
+		std::cout << std::endl;
+		for (auto &f : printStart_hooks) f(*this);
 		std::cout << GAGA_COLOR_GREY;
 		for (int i = 0; i < nbCol - 1; ++i) std::cout << "━";
 		std::cout << GAGA_COLOR_NORMAL << std::endl;
@@ -1405,6 +1269,16 @@ template <typename DNA, typename Fp = simpleVec> class GA {
 			currentGenStats["global"]["nSpecies"] = species.size();
 		}
 		genStats.push_back(currentGenStats);
+	}
+
+	string selectMethodToString(const SelectionMethod &sm) {
+		switch (sm) {
+			case SelectionMethod::paretoTournament:
+				return "pareto tournament";
+			case SelectionMethod::randomObjTournament:
+				return "random objective tournament";
+		}
+		return "???";
 	}
 
  public:
@@ -1483,9 +1357,8 @@ template <typename DNA, typename Fp = simpleVec> class GA {
 			output << GAGA_COLOR_GREYBOLD << " | (already evaluated)\n" << GAGA_COLOR_NORMAL;
 		else
 			output << "\n";
-		if ((!novelty && verbosity >= 2) || verbosity >= 3) output << ind.infos << std::endl;
-		if (novelty && verbosity >= 2)
-			output << footprintToString(ind.footprint) << std::endl;
+		if (verbosity >= 3) output << ind.infos << std::endl;
+		for (auto &f : printIndividual_hooks) output << f(*this, ind);
 		std::cout << output.str();
 	}
 
@@ -1738,10 +1611,8 @@ template <typename DNA, typename Fp = simpleVec> class GA {
 		fs.close();
 	}
 
-	GAGA_PROTECTED_TESTABLE :
-
-	    int
-	    mkd(const char *p) {
+ public:
+	int static mkd(const char *p) {
 #ifdef _WIN32
 		return _mkdir(p);
 #else
@@ -1788,7 +1659,6 @@ template <typename DNA, typename Fp = simpleVec> class GA {
 		mkd(folder.c_str());
 	}
 
- public:
 	void loadPop(string file) {
 		std::ifstream t(file);
 		std::stringstream buffer;
@@ -1816,20 +1686,6 @@ template <typename DNA, typename Fp = simpleVec> class GA {
 		mkd(baseName.str().c_str());
 		std::stringstream fileName;
 		fileName << baseName.str() << "/pop" << currentGeneration << ".pop";
-		std::ofstream file;
-		file.open(fileName.str());
-		file << o.dump();
-		file.close();
-	}
-
-	void saveArchive() {
-		json o = Ind_t::popToJSON(archive);
-		o["evaluator"] = evaluatorName;
-		std::stringstream baseName;
-		baseName << folder << "/gen" << currentGeneration;
-		mkd(baseName.str().c_str());
-		std::stringstream fileName;
-		fileName << baseName.str() << "/archive" << currentGeneration << ".pop";
 		std::ofstream file;
 		file.open(fileName.str());
 		file << o.dump();

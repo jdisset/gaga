@@ -1,12 +1,16 @@
 #pragma once
 #include <sqlite3.h>
+#include <cassert>
+#include <functional>
 #include <iostream>
 #include <sstream>
 #include <string>
 #include <unordered_map>
 #include <vector>
 
-struct SQLiteSaver {
+template <typename GA> struct SQLiteSaver {
+	using Ind_t = typename GA::Ind_t;
+
 	int currentRunId = -1;
 	sqlite3 *db = nullptr;
 
@@ -14,10 +18,21 @@ struct SQLiteSaver {
 
 	std::vector<std::vector<size_t>> gagaToSQLiteIds;
 
-	SQLiteSaver(std::string dbfile, const std::string &conf) {
+	template <typename E> void useExtension(E &e) {
+		e.template onSQLiteRegister<SQLiteSaver, sqlite3_stmt>(*this);
+	}
+
+	std::vector<std::tuple<
+	    std::string, std::string,
+	    std::function<void(const Ind_t &, SQLiteSaver &, size_t, sqlite3_stmt *)>>>
+	    extraIndividualColumns;
+
+	template <typename C> void addIndividualColumns(const C &c) {
+		extraIndividualColumns.insert(extraIndividualColumns.end(), c.begin(), c.end());
+	}
+
+	SQLiteSaver(std::string dbfile) {
 		if (sqlite3_open(dbfile.c_str(), &db)) throw std::runtime_error(sqlite3_errmsg(db));
-		createTables();
-		newRun(conf);
 	}
 
 	void createTables() {
@@ -31,11 +46,13 @@ struct SQLiteSaver {
 		    "CREATE TABLE IF NOT EXISTS individual("
 		    "id INTEGER PRIMARY KEY,"
 		    "dna TEXT,"
-		    "signature TEXT,"
 		    "eval_time REAL,"
 		    "already_evaluated BOOLEAN,"
-		    "archived BOOLEAN,"
-		    "infos TEXT,"
+		    "infos TEXT,";
+		for (auto &c : extraIndividualColumns) {
+			sql += std::get<0>(c) + " " + std::get<1>(c) + ",";
+		}
+		sql +=
 		    "id_generation INTEGER);"
 		    "CREATE TABLE IF NOT EXISTS generation("
 		    "id INTEGER PRIMARY KEY,"
@@ -61,7 +78,8 @@ struct SQLiteSaver {
 		exec(sql);
 	}
 
-	void newRun(const std::string &conf) {
+	void newRun(const std::string &conf = "") {
+		createTables();
 		std::ostringstream runReq;
 		runReq << "INSERT INTO run(config,start,duration) VALUES ('" << conf
 		       << "',datetime('now'),0);";
@@ -70,36 +88,44 @@ struct SQLiteSaver {
 		assert(currentRunId >= 0);
 	}
 
-	template <typename T> void insertAllIndividuals(size_t idGeneration, const T &ga) {
+	void insertAllIndividuals(size_t idGeneration, const GA &ga) {
 		assert(idGeneration >= 0);
 		auto &population = ga.previousGenerations.back();
 		std::string sql =
 		    "INSERT INTO individual "
-		    "(dna,signature,eval_time,already_evaluated,archived,infos,id_generation) "
+		    "(dna,eval_time,already_evaluated,infos,";
+		for (auto &c : extraIndividualColumns) sql += std::get<0>(c) + ",";
+		sql +=
+		    "id_generation) "
 		    "VALUES "
-		    "(?1, ?2, ?3, ?4, ?5, ?6, ?7);";
+		    "(?1, ?2, ?3, ?4,";
+		const size_t FIRST_ADDED_COL = 5;
+		size_t i = FIRST_ADDED_COL;
+
+		for (size_t c = 0; c < extraIndividualColumns.size(); c++)
+			sql += " ?" + std::to_string(i++) + ",";
+		sql += " ?" + std::to_string(i) + ");";
 		sqlite3_stmt *stmt;
+		const size_t LAST_COL = i;
+
 		sqlite3_prepare_v2(db, sql.c_str(), -1, &stmt, 0);
 		for (const auto &ind : population) {
-			bool archived = false;
-			if (ga.noveltyEnabled()) {
-				for (const auto &archInd : ga.getArchive()) {
-					if (archInd.id == ind.id) {
-						archived = true;
-						break;
-					}
-				}
-			}
+			bind(stmt, ind.dna.serialize(), ind.evalTime, ind.wasAlreadyEvaluated, ind.infos);
 
-			decltype(ind.toJSON()) signature(ind.footprint);
-			bind(stmt, ind.dna.serialize(), signature.dump(), ind.evalTime,
-			     ind.wasAlreadyEvaluated, archived, ind.infos, idGeneration);
+			// adding extra columns values (from extensions)
+			i = FIRST_ADDED_COL;
+			for (const auto &c : extraIndividualColumns) std::get<2>(c)(ind, *this, i++, stmt);
+
+			// last column = idGeneration
+			assert(i == LAST_COL);
+			sqbind(stmt, LAST_COL, idGeneration);
+
 			size_t idInd = sqlite3_last_insert_rowid(db);
 			gagaToSQLiteIds.back().push_back(idInd);  // we save the id of this new individual
 		}
 	}
 
-	template <typename GA> int insertNewGeneration(const GA &ga) {
+	int insertNewGeneration(const GA &ga) {
 		int idGeneration = -1;
 		int generationNumber = ga.getCurrentGenerationNumber() - 1;
 		{
@@ -136,7 +162,7 @@ struct SQLiteSaver {
 		return idGeneration;
 	}
 
-	template <typename GA> void newGen(const GA &ga) {
+	void newGen(const GA &ga) {
 		assert(currentRunId >= 0);
 
 		int idGeneration = insertNewGeneration(ga);
