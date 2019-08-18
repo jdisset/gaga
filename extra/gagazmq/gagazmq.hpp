@@ -248,11 +248,14 @@ template <typename GA_t> struct ZMQServer {
  public:
 	using ind_t = typename GA_t::Ind_t;
 
-	GA_t ga;       // GAGA instance:
+	GA_t& ga;      // GAGA instance:
 	json extra{};  // the json extra is sent to the workers with each EVAL request
 
-	ZMQServer() : context(1), socket(context, ZMQ_ROUTER) {
+	ZMQServer(GA_t& g) : context(1), socket(context, ZMQ_ROUTER), ga(g) {
 		ga.setEvaluateFunction([&]() { distributedEvaluate(); });
+	}
+	void disable() {
+		ga.setEvaluateFunction([&]() { ga.defaultEvaluate(); });
 	}
 
 	void setCompression(bool comp) {

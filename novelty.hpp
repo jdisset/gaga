@@ -1,3 +1,4 @@
+#pragma once
 #include <vector>
 #include "gaga.hpp"
 
@@ -36,6 +37,8 @@ template <typename GA> struct NoveltyExtension {
 	size_t K = 5;                    // size of the neighbourhood for novelty
 	bool saveArchiveEnabled = true;  // save the novelty archive
 	size_t nbOfArchiveAdditionsPerGeneration = 5;
+
+	void clear() { archive.clear(); }
 
 	template <typename F> void setComputeSignatureDistanceFunction(F &&f) {
 		computeSignatureDistance = std::forward<F>(f);
@@ -110,7 +113,6 @@ template <typename GA> struct NoveltyExtension {
 		columns.emplace_back("signature", "TEXT",
 		                     [](const Ind_t &individual, SQLPlugin &sqlPlugin, size_t index,
 		                        SQLStatement *stmt) {
-			                     assert(individual.signature == individual.dna.numbers);
 			                     json jsSig = individual.signature;
 			                     sqlPlugin.sqbind(stmt, index, jsSig.dump());
 		                     });
@@ -249,7 +251,7 @@ template <typename GA> struct NoveltyExtension {
 		setComputDistanceMatrixFunction(
 		    [&](const auto &a) { return distributedComputeDistanceMatrix(a, server); });
 	}
-	template <typename S> void disableDistributed() {
+	void disableDistributed() {
 		setComputDistanceMatrixFunction(
 		    [&](const auto &ar) { return defaultComputeDistanceMatrix(ar); });
 	}
@@ -294,8 +296,8 @@ template <typename GA> struct NoveltyExtension {
 		// tasks = pairs of ar id for which the workers should compute a distance
 		std::vector<std::pair<size_t, size_t>> distancePairs;
 		distancePairs.reserve(0.5 * std::pow(ar.size() - firstNewId, 2));
-		for (size_t i = firstNewId; i < ar.size(); ++i) {
-			for (size_t j = i + 1; j < ar.size(); ++j) {
+		for (size_t i = 0; i < ar.size(); ++i) {
+			for (size_t j = std::max(firstNewId, i + 1); j < ar.size(); ++j) {
 				distancePairs.emplace_back(i, j);
 			}
 		}
@@ -305,8 +307,7 @@ template <typename GA> struct NoveltyExtension {
 		for (const auto &i : ar) archive_js.push_back(i.toJSON());
 		json extra_js{{"archive", archive_js}};
 
-		// called whenever results are sent by a worker. We just update the distance
-		// matrix
+		// called whenever results are sent by a worker. We just update the distance matrix
 		auto distanceResults = [&](const auto &req) {
 			auto distances = req.at("distances");
 			for (auto &d : distances) {  // d = [i, j, dist]

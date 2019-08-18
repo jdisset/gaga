@@ -6,6 +6,7 @@
 #include "catch/catch.hpp"
 #include "dna.hpp"
 #include "gagazmq_tests.hpp"
+#include "sqlite_tests.hpp"
 
 template <typename T> void initGA() {
 	GAGA::GA<T> ga;

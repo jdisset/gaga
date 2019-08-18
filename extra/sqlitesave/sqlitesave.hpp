@@ -107,19 +107,19 @@ template <typename GA> struct SQLiteSaver {
 		sql += " ?" + std::to_string(i) + ");";
 		sqlite3_stmt *stmt;
 		const size_t LAST_COL = i;
-
 		sqlite3_prepare_v2(db, sql.c_str(), -1, &stmt, 0);
+
 		for (const auto &ind : population) {
 			bind(stmt, ind.dna.serialize(), ind.evalTime, ind.wasAlreadyEvaluated, ind.infos);
 
 			// adding extra columns values (from extensions)
-			i = FIRST_ADDED_COL;
+			size_t i = FIRST_ADDED_COL;
 			for (const auto &c : extraIndividualColumns) std::get<2>(c)(ind, *this, i++, stmt);
 
 			// last column = idGeneration
 			assert(i == LAST_COL);
 			sqbind(stmt, LAST_COL, idGeneration);
-
+			step(stmt);
 			size_t idInd = sqlite3_last_insert_rowid(db);
 			gagaToSQLiteIds.back().push_back(idInd);  // we save the id of this new individual
 		}
@@ -138,6 +138,7 @@ template <typename GA> struct SQLiteSaver {
 			sqlite3_prepare_v2(db, sql.c_str(), -1, &stmt, 0);
 			bind(stmt, generationNumber, ga.genStats.back().at("global").at("genTotalTime"),
 			     currentRunId);
+			step(stmt);
 			idGeneration = sqlite3_last_insert_rowid(db);
 			gagaToSQLiteIds.push_back(std::vector<size_t>());
 		}
@@ -154,6 +155,7 @@ template <typename GA> struct SQLiteSaver {
 			for (const auto &o : ga.previousGenerations.back()[0].fitnesses) {
 				std::string type = "MAX";
 				bind(stmt, o.first, type, currentRunId);
+				step(stmt);
 				int idObj = sqlite3_last_insert_rowid(db);
 				objectivesId[o.first] = idObj;
 			}
@@ -181,6 +183,7 @@ template <typename GA> struct SQLiteSaver {
 			for (const auto &ind : ga.previousGenerations.back()) {
 				for (const auto &o : ind.fitnesses) {
 					bind(stmt, objectivesId.at(o.first), getIndId(ind.id), o.second);
+					step(stmt);
 				}
 			}
 		}
@@ -203,6 +206,7 @@ template <typename GA> struct SQLiteSaver {
 					else if (ind.inheritanceType == "copy")
 						type = 'C';
 					bind(stmt, getIndId(p), getIndId(ind.id), type);
+					step(stmt);
 				}
 			}
 		}
@@ -217,10 +221,31 @@ template <typename GA> struct SQLiteSaver {
 
 	void endRun() {}
 
+	static int callbackHandler(void *actualCallback, int argc, char **argv,
+	                           char **azColName) {
+		auto ptr =
+		    (static_cast<std::function<void(int, char **, char **)> *>(actualCallback));
+		(*ptr)(argc, argv, azColName);
+		return 0;
+	}
+
 	void exec(std::string sql) {
 		if (!db) throw std::invalid_argument("db pointer is null");
-		char *err_msg = 0;
+		char *err_msg = nullptr;
 		int rc = sqlite3_exec(db, sql.c_str(), 0, 0, &err_msg);
+		if (rc != SQLITE_OK) {
+			std::ostringstream errorMsg;
+			errorMsg << "SQL error: " << err_msg << ". \n\nREQ = " << sql << std::endl;
+			sqlite3_free(err_msg);
+			throw std::invalid_argument(errorMsg.str());
+		} else
+			sqlite3_free(err_msg);
+	}
+	template <typename C> void exec(std::string sql, const C &callback) {
+		if (!db) throw std::invalid_argument("db pointer is null");
+		char *err_msg = nullptr;
+		std::function<void(int, char **, char **)> cbackFunc = callback;
+		int rc = sqlite3_exec(db, sql.c_str(), callbackHandler, &cbackFunc, &err_msg);
 		if (rc != SQLITE_OK) {
 			std::ostringstream errorMsg;
 			errorMsg << "SQL error: " << err_msg << ". \n\nREQ = " << sql << std::endl;
@@ -254,10 +279,12 @@ template <typename GA> struct SQLiteSaver {
 		int res =
 		    bind_impl(stmt, std::index_sequence_for<Args...>{}, std::forward<Args>(args)...);
 
+		return res;
+	}
+	void step(sqlite3_stmt *stmt) {
 		sqlite3_step(stmt);
 		sqlite3_clear_bindings(stmt);
 		sqlite3_reset(stmt);
-		return res;
 	}
 
 	~SQLiteSaver() {

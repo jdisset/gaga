@@ -501,8 +501,6 @@ template <typename DNA, typename Ind = Individual<DNA>> class GA {
 	void setPopulation(const std::vector<Ind_t> &p) {
 		if (procId == 0) {
 			population = p;
-			if (population.size() != popSize)
-				throw std::invalid_argument("Population doesn't match the popSize param");
 			popSize = population.size();
 		}
 		setPopulationId(population, currentGeneration);
