@@ -49,10 +49,10 @@ class GAGAWorker:
                 self.socket.recv() #ACK
 
             elif rep['req'] == 'DISTANCE': # Distance computations for novelty
-                footprints = [i['footprint'] for i in rep['extra']['archive']]
+                signatures = [i['signature'] for i in rep['extra']['archive']]
                 distances = [i for i in rep['tasks']]
-                print('computing', len(distances), 'distances from', len(footprints), 'footprints')
-                distances = [[i[0],i[1],self.distanceFunc(footprints[i[0]], footprints[i[1]])] for i in distances]
+                print('computing', len(distances), 'distances from', len(signatures), 'signatures')
+                distances = [[i[0],i[1],self.distanceFunc(signatures[i[0]], signatures[i[1]])] for i in distances]
                 print('distances = ', distances)
                 reply = self.encodeMsg({'req':'RESULT', 'distances':distances})
                 self.socket.send(reply)
