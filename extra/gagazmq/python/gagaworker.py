@@ -1,10 +1,12 @@
 from __future__ import print_function
 import time
+import datetime
 import random
 from random import randint
 import zmq
 import json
 import msgpack
+import logging
 
 class GAGAWorker:
 
@@ -35,13 +37,11 @@ class GAGAWorker:
     def start(self):
         while True:
             # send a READY request and wait for a reply
-            print("sending ready");
             self.socket.send(self.encodeMsg({'req':'READY', 'EVAL_batchSize':self.evalBatchSize, 'DISTANCE_batchSize':self.distanceBatchSize}))
             rep = self.decodeMsg(self.socket.recv())
-            print("received");
 
             if rep['req'] == 'EVAL': # Evaluation of individuals
-                #dnaList = [i['dna'] for i in rep['tasks']]
+                logging.info("[WORKER %s] - Received %d EVAL tasks", self.identity, len(rep['tasks']));
                 results = self.evaluationFunc(rep['tasks'], rep['extra'])
                 assert len(results) == len(rep['tasks'])
                 reply = self.encodeMsg({'req':'RESULT', 'individuals':results})
@@ -51,9 +51,12 @@ class GAGAWorker:
             elif rep['req'] == 'DISTANCE': # Distance computations for novelty
                 signatures = [i['signature'] for i in rep['extra']['archive']]
                 distances = [i for i in rep['tasks']]
-                print('computing', len(distances), 'distances from', len(signatures), 'signatures')
+                logging.info("[WORKER %s] - Received %d distances computations for %d signatures", self.identity, len(rep['tasks']), len(signatures));
+                logging.debug("[WORKER %s] - Signatures : %s", self.identity, json.dumps(signatures));
+                ta = datetime.datetime.now()
                 distances = [[i[0],i[1],self.distanceFunc(signatures[i[0]], signatures[i[1]])] for i in distances]
-                print('distances = ', distances)
+                delta = datetime.datetime.now() - ta
+                logging.info("[WORKER %s] - Computed %d distances in %d ms", self.identity, len(rep['tasks']), int(delta.total_seconds()*1000));
                 reply = self.encodeMsg({'req':'RESULT', 'distances':distances})
                 self.socket.send(reply)
                 self.socket.recv() #ACK

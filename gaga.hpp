@@ -219,23 +219,24 @@ template <typename DNA, typename Ind = Individual<DNA>> class GA {
 	    /*********************************************************************************
 	     *                            MAIN GA SETTINGS
 	     ********************************************************************************/
-	    unsigned int verbosity = 2;       // 0 = silent; 1 = generations stats;
-	                                      // 2 = individuals stats; 3 = everything
-	size_t popSize = 500;                 // nb of individuals in the population
-	size_t nbElites = 1;                  // nb of elites to keep accross generations
-	size_t nbSavedElites = 1;             // nb of elites to save
-	size_t tournamentSize = 5;            // nb of competitors in tournament
-	bool savePopEnabled = true;           // save the whole population
-	unsigned int savePopInterval = 1;     // interval between 2 whole population saves
-	unsigned int saveGenInterval = 1;     // interval between 2 elites/pareto saves
-	string folder = "../evos/";           // where to save the results
-	string evaluatorName;                 // name of the given evaluator func
-	double crossoverRate = 0.2;           // crossover probability
-	double mutationRate = 0.5;            // mutation probablility
-	bool evaluateAllIndividuals = false;  // force evaluation of every individual
-	bool doSaveParetoFront = false;       // save the pareto front
-	bool doSaveGenStats = true;           // save generations stats to csv file
-	bool doSaveIndStats = false;          // save individuals stats to csv file
+	    unsigned int verbosity = 2;          // 0 = silent; 1 = generations stats;
+	                                         // 2 = individuals stats; 3 = everything
+	size_t popSize = 500;                    // nb of individuals in the population
+	size_t nbElites = 1;                     // nb of elites to keep accross generations
+	size_t nbSavedElites = 1;                // nb of elites to save
+	size_t tournamentSize = 5;               // nb of competitors in tournament
+	bool savePopEnabled = true;              // save the whole population
+	unsigned int savePopInterval = 1;        // interval between 2 whole population saves
+	unsigned int saveGenInterval = 1;        // interval between 2 elites/pareto saves
+	string folder = "../evos/";              // where to save the results
+	string evaluatorName;                    // name of the given evaluator func
+	double crossoverRate = 0.2;              // crossover probability
+	double mutationRate = 0.5;               // mutation probablility
+	bool evaluateAllIndividuals = false;     // force evaluation of every individual
+	bool doSaveParetoFront = false;          // save the pareto front
+	bool doSaveGenStats = true;              // save generations stats to csv file
+	bool doSaveIndStats = false;             // save individuals stats to csv file
+	bool saveAllPreviousGenerations = true;  // save all previous generations in memory
 	SelectionMethod selecMethod = SelectionMethod::paretoTournament;
 	// for speciation:
 	bool speciation = false;           // enable speciation
@@ -337,8 +338,11 @@ template <typename DNA, typename Ind = Individual<DNA>> class GA {
 	void setSaveIndStats(bool m) { doSaveIndStats = m; }
 
 	// main current and previous population containers
-	std::vector<Ind_t> population;  // current population
-	std::vector<std::vector<Ind_t>> previousGenerations;
+	void disableGenerationHistory() { saveAllPreviousGenerations = false; }
+	void enableGenerationHistory() { saveAllPreviousGenerations = true; }
+	std::vector<Ind_t> population;                        // current population
+	std::vector<std::vector<Ind_t>> previousGenerations;  // previous generations. Contains
+	                                                      // at least the most recent one.
 
 	// for speciation:
 	void enableSpeciation() {
@@ -639,7 +643,7 @@ template <typename DNA, typename Ind = Individual<DNA>> class GA {
 		// create next generation
 		auto nextGen = produceNOffsprings(popSize, population, nbElites, objectives);
 		// save old gen, next gen becomes current one,.
-		previousGenerations.push_back(population);
+		savePopToPreviousGenerations(population);
 		population = nextGen;
 		setPopulationId(population, currentGeneration + 1);
 		if (verbosity >= 3) cerr << "Next generation ready" << endl;
@@ -752,7 +756,7 @@ template <typename DNA, typename Ind = Individual<DNA>> class GA {
 				               std::make_move_iterator(specieOffsprings.end()));
 			}
 		}
-		previousGenerations.push_back(population);
+		savePopToPreviousGenerations(population);
 		population = nextGen;
 		setPopulationId(population, currentGeneration + 1);
 
@@ -1442,6 +1446,11 @@ template <typename DNA, typename Ind = Individual<DNA>> class GA {
 				}
 			}
 		}
+	}
+
+	template <typename P> void savePopToPreviousGenerations(const P &population) {
+		if (!saveAllPreviousGenerations) previousGenerations.clear();
+		previousGenerations.push_back(population);
 	}
 
 	void saveParetoFront() {

@@ -14,7 +14,7 @@ TEST_CASE("Novelty") {
 	using GA_t = GAGA::GA<dna_t, Ind_t>;
 	using dMat_t = std::vector<std::vector<double>>;
 
-	const size_t NGENERATIONS = 10;
+	const size_t NGENERATIONS = 20;
 
 	GA_t ga;
 	ga.setVerbosity(0);
@@ -29,6 +29,9 @@ TEST_CASE("Novelty") {
 
 	auto firstPop = ga.population;
 	GAGA::NoveltyExtension<GA_t> nov;
+	const size_t MAX_ARCHIVE_SIZE = 30;
+	nov.maxArchiveSize = MAX_ARCHIVE_SIZE;
+	nov.nbOfArchiveAdditionsPerGeneration = 12;
 	ga.useExtension(nov);
 
 	auto euclidian = [](const auto& fpA, const auto& fpB) {
@@ -43,6 +46,8 @@ TEST_CASE("Novelty") {
 		for (size_t g = 0; g < NGENERATIONS; ++g) {
 			ga.step();
 			REQUIRE(nov.archive.size() > 0);
+			REQUIRE(nov.archive.size() <= nov.maxArchiveSize);
+			if (g > 2) REQUIRE(nov.archive.size() == MAX_ARCHIVE_SIZE);
 			auto distMat = nov.defaultComputeDistanceMatrix(nov.archive);
 			REQUIRE(distMat.size() == nov.archive.size());
 			REQUIRE(distMat.size() == distMat[0].size());
@@ -115,7 +120,8 @@ TEST_CASE("Novelty") {
 						}
 					}
 				}
-				REQUIRE(nov.archive.size() > prevArchiveSize);
+				REQUIRE((nov.archive.size() > prevArchiveSize ||
+				         nov.archive.size() == MAX_ARCHIVE_SIZE));
 				prevArchiveSize = nov.archive.size();
 			}
 		}
