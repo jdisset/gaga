@@ -35,7 +35,7 @@ template <typename GA> struct NoveltyExtension {
 
 	bool nslc = false;               // enable noverlty search with local competition
 	std::vector<Ind_t> archive;      // novelty archive, Individuals are stored there.
-	size_t K = 5;                    // size of the neighbourhood for novelty
+	size_t K = 7;                    // size of the neighbourhood for novelty
 	bool saveArchiveEnabled = true;  // save the novelty archive
 	size_t maxArchiveSize = 2048;
 	size_t nbOfArchiveAdditionsPerGeneration = 5;
@@ -200,7 +200,8 @@ template <typename GA> struct NoveltyExtension {
 				// we normalize the rank
 				double knnSize = knn.size() > 0 ? static_cast<double>(knn.size()) : 1.0;
 				double localScore =
-				    static_cast<double>(ga.getParetoRank(knnPtr, knnPtr.size(), objs)) / knnSize;
+				    static_cast<double>(ga.getParetoRank(knnPtr, knnPtr.size() - 1, objs)) /
+				    knnSize;
 				population[p_i].fitnesses["local_score"] = 1.0 - localScore;
 			}
 
