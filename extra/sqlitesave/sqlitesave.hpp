@@ -14,12 +14,23 @@ template <typename GA> struct SQLiteSaver {
 	int currentRunId = -1;
 	sqlite3 *db = nullptr;
 
-	std::unordered_map<std::string, size_t> objectivesId;
+	std::unordered_map<std::string, size_t> objectivesId;  // objs ids in db
 
-	std::vector<std::vector<size_t>> gagaToSQLiteIds;
+	std::vector<std::vector<size_t>> gagaToSQLiteIds;  // individuals ids in db
+
+	std::vector<size_t> generationIds;  // generation ids in db
 
 	template <typename E> void useExtension(E &e) {
 		e.template onSQLiteRegister<SQLiteSaver, sqlite3_stmt>(*this);
+	}
+
+	std::vector<std::function<void(SQLiteSaver &)>> newRunExtras;
+	std::vector<std::function<void(SQLiteSaver &, const GA &)>> newGenExtras;
+
+	template <typename F1, typename F2>
+	void addExtraTableInstructions(const F1 &onNewRun, const F2 &onNewGen) {
+		newRunExtras.push_back(onNewRun);
+		newGenExtras.push_back(onNewGen);
 	}
 
 	std::vector<std::tuple<
@@ -53,6 +64,7 @@ template <typename GA> struct SQLiteSaver {
 			sql += std::get<0>(c) + " " + std::get<1>(c) + ",";
 		}
 		sql +=
+		    "original_id INTEGER,"
 		    "id_generation INTEGER);"
 		    "CREATE TABLE IF NOT EXISTS generation("
 		    "id INTEGER PRIMARY KEY,"
@@ -86,6 +98,7 @@ template <typename GA> struct SQLiteSaver {
 		exec(runReq.str());
 		currentRunId = sqlite3_last_insert_rowid(db);
 		assert(currentRunId >= 0);
+		for (auto &f : newRunExtras) f(*this);
 	}
 
 	void insertAllIndividuals(size_t idGeneration, const GA &ga) {
@@ -96,18 +109,18 @@ template <typename GA> struct SQLiteSaver {
 		    "(dna,eval_time,already_evaluated,infos,";
 		for (auto &c : extraIndividualColumns) sql += std::get<0>(c) + ",";
 		sql +=
-		    "id_generation) "
+		    "original_id, id_generation) "
 		    "VALUES "
 		    "(?1, ?2, ?3, ?4,";
 		const size_t FIRST_ADDED_COL = 5;
 		size_t i = FIRST_ADDED_COL;
 
-		for (size_t c = 0; c < extraIndividualColumns.size(); c++)
+		for (size_t c = 0; c < extraIndividualColumns.size() + 1; c++)
 			sql += " ?" + std::to_string(i++) + ",";
 		sql += " ?" + std::to_string(i) + ");";
 		sqlite3_stmt *stmt;
 		const size_t LAST_COL = i;
-		sqlite3_prepare_v2(db, sql.c_str(), -1, &stmt, 0);
+		prepare(sql, &stmt);
 
 		for (const auto &ind : population) {
 			bind(stmt, ind.dna.serialize(), ind.evalTime, ind.wasAlreadyEvaluated, ind.infos);
@@ -116,16 +129,18 @@ template <typename GA> struct SQLiteSaver {
 			size_t i = FIRST_ADDED_COL;
 			for (const auto &c : extraIndividualColumns) std::get<2>(c)(ind, *this, i++, stmt);
 
-			// last column = idGeneration
+			sqbind(stmt, i++, ind.id.second);  // original id
 			assert(i == LAST_COL);
-			sqbind(stmt, LAST_COL, idGeneration);
+			sqbind(stmt, i, idGeneration);
 			step(stmt);
 			size_t idInd = sqlite3_last_insert_rowid(db);
 			gagaToSQLiteIds.back().push_back(idInd);  // we save the id of this new individual
 		}
 	}
 
-	int insertNewGeneration(const GA &ga) {
+	size_t getLastInsertId() { return sqlite3_last_insert_rowid(db); }
+
+	void insertNewGeneration(const GA &ga) {
 		int idGeneration = -1;
 		int generationNumber = ga.getCurrentGenerationNumber() - 1;
 		{
@@ -135,11 +150,12 @@ template <typename GA> struct SQLiteSaver {
 			    "VALUES "
 			    "(?1, ?2, ?3);";
 			sqlite3_stmt *stmt;
-			sqlite3_prepare_v2(db, sql.c_str(), -1, &stmt, 0);
+			prepare(sql, &stmt);
 			bind(stmt, generationNumber, ga.genStats.back().at("global").at("genTotalTime"),
 			     currentRunId);
 			step(stmt);
 			idGeneration = sqlite3_last_insert_rowid(db);
+			generationIds.push_back(idGeneration);
 			gagaToSQLiteIds.push_back(std::vector<size_t>());
 		}
 
@@ -150,24 +166,27 @@ template <typename GA> struct SQLiteSaver {
 			    "VALUES "
 			    "(?1, ?2, ?3);";
 			sqlite3_stmt *stmt;
-			sqlite3_prepare_v2(db, sql.c_str(), -1, &stmt, 0);
+			prepare(sql, &stmt);
 			assert(ga.previousGenerations.back().size() > 0);
 			for (const auto &o : ga.previousGenerations.back()[0].fitnesses) {
 				std::string type = "MAX";
 				bind(stmt, o.first, type, currentRunId);
 				step(stmt);
-				int idObj = sqlite3_last_insert_rowid(db);
+				int idObj = getLastInsertId();
 				objectivesId[o.first] = idObj;
 			}
 		}
+	}
 
-		return idGeneration;
+	void prepare(const std::string &sql, sqlite3_stmt **stmt) {
+		sqlite3_prepare_v2(db, sql.c_str(), -1, stmt, 0);
 	}
 
 	void newGen(const GA &ga) {
 		assert(currentRunId >= 0);
 
-		int idGeneration = insertNewGeneration(ga);
+		insertNewGeneration(ga);
+		size_t idGeneration = generationIds.back();
 		size_t generationNumber = ga.getCurrentGenerationNumber() - 1;
 		insertAllIndividuals(idGeneration, ga);
 		assert(gagaToSQLiteIds.size() == generationNumber + 1);
@@ -211,6 +230,7 @@ template <typename GA> struct SQLiteSaver {
 			}
 		}
 		assert(gagaToSQLiteIds.back().size() == ga.previousGenerations.back().size());
+		for (auto &f : newGenExtras) f(*this, ga);
 	}
 
 	size_t getIndId(std::pair<size_t, size_t> id) {

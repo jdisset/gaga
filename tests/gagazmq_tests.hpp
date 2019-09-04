@@ -17,6 +17,7 @@ TEST_CASE("Novelty") {
 	const size_t NGENERATIONS = 20;
 
 	GA_t ga;
+	ga.setPopSize(100);
 	ga.setVerbosity(0);
 	auto onemax = [](auto& i) {
 		i.fitnesses["sum"] = std::accumulate(i.dna.values.begin(), i.dna.values.end(), 0);
@@ -31,7 +32,7 @@ TEST_CASE("Novelty") {
 	GAGA::NoveltyExtension<GA_t> nov;
 	const size_t MAX_ARCHIVE_SIZE = 30;
 	nov.maxArchiveSize = MAX_ARCHIVE_SIZE;
-	nov.nbOfArchiveAdditionsPerGeneration = 12;
+	nov.nbOfArchiveAdditionsPerGeneration = 14;
 	ga.useExtension(nov);
 
 	auto euclidian = [](const auto& fpA, const auto& fpB) {
@@ -94,17 +95,21 @@ TEST_CASE("Novelty") {
 		server.setCompression(COMPRESSION);
 		server.bind(port);
 
-		// nov.enableDistributed(server);
+		nov.enableDistributed(server);
 
 		SECTION("distributed distance matrix is the same as non distributed") {
 			size_t prevArchiveSize = 0;
 			for (size_t g = 0; g < NGENERATIONS; ++g) {
+				std::cerr << " ---------------- GEN " << g << std::endl;
 				ga.step();
-
-				auto distMat_nonDistributed = nov.defaultComputeDistanceMatrix(nov.archive);
 
 				auto distMat_distributed =
 				    nov.distributedComputeDistanceMatrix(nov.archive, server);
+				auto distMat_nonDistributed = nov.defaultComputeDistanceMatrix(nov.archive);
+		   /*     std::cerr << "distributed = " << nlohmann::json(distMat_distributed).dump()*/
+						  //<< std::endl;
+				//std::cerr << "non distributed = " << nlohmann::json(distMat_nonDistributed).dump()
+						  //<< std::endl;
 
 				REQUIRE(distMat_nonDistributed.size() == nov.archive.size());
 

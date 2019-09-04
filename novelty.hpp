@@ -38,7 +38,7 @@ template <typename GA> struct NoveltyExtension {
 	size_t K = 7;                    // size of the neighbourhood for novelty
 	bool saveArchiveEnabled = true;  // save the novelty archive
 	size_t maxArchiveSize = 2048;
-	size_t nbOfArchiveAdditionsPerGeneration = 5;
+	size_t nbOfArchiveAdditionsPerGeneration = 10;
 
 	void clear() { archive.clear(); }
 
@@ -89,10 +89,12 @@ template <typename GA> struct NoveltyExtension {
 		});
 	}
 
-	bool isArchived(const Ind_t &ind) {
+	bool isArchived(const Ind_t &ind) { return isArchived(ind.id); }
+
+	bool isArchived(const std::pair<size_t, size_t> &id) {
 		bool archived = false;
 		for (const auto &archInd : archive) {
-			if (archInd.id == ind.id) {
+			if (archInd.id == id) {
 				archived = true;
 				break;
 			}
@@ -101,17 +103,13 @@ template <typename GA> struct NoveltyExtension {
 	}
 
 	// SQL bindings
+	size_t archiveSQLId = 0;
 	template <typename SQLPlugin, typename SQLStatement>
 	void onSQLiteRegister(SQLPlugin &saver) {
 		std::vector<std::tuple<
 		    std::string, std::string,
 		    std::function<void(const Ind_t &, SQLPlugin &, size_t, SQLStatement *)>>>
 		    columns;
-		columns.emplace_back("archived", "BOOLEAN",
-		                     [&](const Ind_t &individual, SQLPlugin &sqlPlugin, size_t index,
-		                         SQLStatement *stmt) {
-			                     sqlPlugin.sqbind(stmt, index, isArchived(individual));
-		                     });
 		columns.emplace_back("signature", "TEXT",
 		                     [](const Ind_t &individual, SQLPlugin &sqlPlugin, size_t index,
 		                        SQLStatement *stmt) {
@@ -119,6 +117,51 @@ template <typename GA> struct NoveltyExtension {
 			                     sqlPlugin.sqbind(stmt, index, jsSig.dump());
 		                     });
 		saver.addIndividualColumns(columns);
+
+		auto onNewRun = [&](auto &sql) {
+			std::string tableCreations =
+			    "CREATE TABLE IF NOT EXISTS archive("
+			    "id INTEGER PRIMARY KEY ,"
+			    "config TEXT,"
+			    "id_run INTEGER);"
+			    "CREATE TABLE IF NOT EXISTS archive_content("
+			    "id INTEGER PRIMARY KEY ,"
+			    "id_archive INTEGER,"
+			    "id_individual INTEGER,"
+			    "id_generation INTEGER);";
+			sql.exec(tableCreations);
+
+			nlohmann::json archiveConf;
+			archiveConf["K"] = K;
+			archiveConf["maxArchiveSize"] = maxArchiveSize;
+			archiveConf["nbOfArchiveAdditionsPerGeneration"] =
+			    nbOfArchiveAdditionsPerGeneration;
+
+			SQLStatement *stmt;
+			std::string req = "INSERT INTO archive(config,id_run) VALUES (?1,?2);";
+			sql.prepare(req, &stmt);
+			sql.bind(stmt, archiveConf.dump(), sql.currentRunId);
+			sql.step(stmt);
+			archiveSQLId = sql.getLastInsertId();
+		};
+
+		auto onNewGen = [&](auto &sql, const auto &ga) {
+			// insert current archive individuals
+			std::string archSQL =
+			    "INSERT INTO archive_content"
+			    "(id_archive, id_individual, id_generation) "
+			    "VALUES "
+			    "(?1, ?2, ?3);";
+
+			SQLStatement *stmt;
+			sql.prepare(archSQL, &stmt);
+			for (const auto &ind : archive) {
+				sql.bind(stmt, archiveSQLId, sql.getIndId(ind.id), sql.generationIds.back());
+				sql.step(stmt);
+			}
+		};
+
+		saver.addExtraTableInstructions(onNewRun, onNewGen);
 	}
 
 	// CORE ALGO
@@ -149,15 +192,20 @@ template <typename GA> struct NoveltyExtension {
 	}
 
 	std::vector<size_t> findKNN(size_t i, size_t knnsize, const distanceMatrix_t &dmat) {
+		return findKNN(i, knnsize, dmat, dmat.size());
+	}
+	std::vector<size_t> findKNN(size_t i, size_t knnsize, const distanceMatrix_t &dmat,
+	                            size_t truncateTo) {
 		// returns the K nearest neighbors of i, according to the distance matrix dmat
 		if (dmat.size() == 0) return std::vector<size_t>();
 		assert(dmat[i].size() == dmat.size());
 		assert(i < dmat.size());
+		assert(truncateTo <= dmat.size());
 		const std::vector<double> &distances = dmat[i];
-		std::vector<size_t> indices(distances.size());
+		std::vector<size_t> indices(truncateTo);
 		std::iota(indices.begin(), indices.end(), 0);
 
-		size_t k = std::max(std::min(knnsize, distances.size() - 1), (size_t)0u);
+		size_t k = std::max(std::min(knnsize, indices.size() - 1), (size_t)0);
 
 		std::nth_element(
 		    indices.begin(), indices.begin() + k, indices.end(),
@@ -169,6 +217,9 @@ template <typename GA> struct NoveltyExtension {
 		return indices;
 	}
 
+	std::vector<Ind_t> prevArchive;
+	distanceMatrix_t distanceMatrix;
+
 	void updateNovelty(std::vector<Ind_t> &population, GA &ga) {
 		// we append the current population to the archive
 		auto savedArchiveSize = archive.size();
@@ -176,7 +227,7 @@ template <typename GA> struct NoveltyExtension {
 
 		// we compute the distance matrix.
 		auto t0 = std::chrono::high_resolution_clock::now();
-		std::vector<std::vector<double>> distanceMatrix = computeDistanceMatrix(archive);
+		distanceMatrix = computeDistanceMatrix(archive);
 		auto t1 = std::chrono::high_resolution_clock::now();
 		double distanceMatrixTime = std::chrono::duration<double>(t1 - t0).count();
 
@@ -184,19 +235,15 @@ template <typename GA> struct NoveltyExtension {
 		for (size_t p_i = 0; p_i < population.size(); p_i++) {
 			size_t i = savedArchiveSize + p_i;  // individuals'id in the archive
 			assert(population[p_i].id == archive[i].id);
-
 			std::vector<size_t> knn = findKNN(i, K, distanceMatrix);
-
 			if (nslc) {  // local competition is enabled
 				// we put all objectives other than novelty into objs
 				auto objs = GA::getAllObjectives(population[p_i]);
 				if (objs.count("novelty")) objs.erase("novelty");
 				if (objs.count("local_score")) objs.erase("local_score");
-
 				std::vector<Ind_t *> knnPtr;  // pointers to knn individuals
 				for (auto k : knn) knnPtr.push_back(&archive[k]);
 				knnPtr.push_back(&archive[i]);  // + itself
-
 				// we normalize the rank
 				double knnSize = knn.size() > 0 ? static_cast<double>(knn.size()) : 1.0;
 				double localScore =
@@ -204,43 +251,30 @@ template <typename GA> struct NoveltyExtension {
 				    knnSize;
 				population[p_i].fitnesses["local_score"] = 1.0 - localScore;
 			}
-
 			// sum = sum of distances between i and its knn
 			// novelty = avg dist to knn
 			double sum = 0;
 			for (auto &j : knn) sum += distanceMatrix[i][j];
 			population[p_i].fitnesses["novelty"] = sum / (double)knn.size();
-
 			ga.printLn(3, "Novelty for ind ", population[p_i].id, " -> ",
 			           population[p_i].fitnesses["novelty"]);
 			ga.printLn(3, "Ind ", population[p_i].id, " signature is ",
 			           signatureToString(population[p_i].signature));
 		}
 
-		// first we erase the entire pop that we had appended to the archive
+		// Archive maintenance: first we erase the entire pop that we had appended
 		archive.erase(archive.begin() + static_cast<long>(savedArchiveSize), archive.end());
 
-		// then we do archive size maintenance operations
-		// we need the distanceMatrix first
-		decltype(distanceMatrix) truncatedDistMatrix;
-		truncatedDistMatrix.reserve(savedArchiveSize);
-
-		for (size_t i = 0; i < savedArchiveSize; ++i) {
-			truncatedDistMatrix.push_back(distanceMatrix[i]);
-			truncatedDistMatrix.back().resize(savedArchiveSize);
-		}
-
-		maintainArchiveSize(population, nbOfArchiveAdditionsPerGeneration,
-		                    truncatedDistMatrix);
+		maintainArchiveSize(population, nbOfArchiveAdditionsPerGeneration);
+		prevArchive = archive;
 
 		ga.printLn(2, "Distance matrix computation took ", distanceMatrixTime, "s");
 		ga.printLn(2, "New archive size = ", archive.size());
 	}
 
-	void maintainArchiveSize(const std::vector<Ind_t> &population, size_t nAdditions,
-	                         const std::vector<std::vector<double>> &distanceMatrix) {
+	void maintainArchiveSize(const std::vector<Ind_t> &population, size_t nAdditions) {
 		auto computeNovelty = [&](size_t id) {
-			std::vector<size_t> knn = findKNN(id, K, distanceMatrix);
+			std::vector<size_t> knn = findKNN(id, K, distanceMatrix, archive.size());
 			double sum = 0;
 			for (auto &j : knn) sum += distanceMatrix[id][j];
 			return sum / (double)knn.size();
@@ -250,30 +284,49 @@ template <typename GA> struct NoveltyExtension {
 		int toReplace = std::min(static_cast<int>(nAdditions),
 		                         std::max(0, static_cast<int>(archive.size() + nAdditions) -
 		                                         static_cast<int>(maxArchiveSize)));
-		// number to add
+		// number of ind to add
 		int toAdd = nAdditions - toReplace;
 
 		assert(toReplace + toAdd == (int)nAdditions);
 
 		std::uniform_int_distribution<size_t> d(0, population.size() - 1);
-		if (toReplace > 0) {
-			// we replace the less novel individuals with random ones of the current gen
-			// for that we refresh the novelty scores for everyone in the archive
-			std::vector<double> tempNovelties(archive.size());
-			for (size_t i = 0; i < archive.size(); ++i) tempNovelties[i] = computeNovelty(i);
 
-			std::vector<size_t> indices(archive.size());
-			std::iota(indices.begin(), indices.end(), 0);
-			std::nth_element(
-			    indices.begin(), indices.begin() + toReplace, indices.end(),
-			    [&](size_t a, size_t b) { return tempNovelties[a] < tempNovelties[b]; });
-			indices.resize(toReplace);  // indices cointains the indices of the replaced ind
+		for (int r = 0; r < toReplace; ++r) {
+			// we recompute novelty values in the archive:
+			std::vector<double> tmpNovelties(archive.size());
+			for (size_t i = 0; i < archive.size(); ++i) tmpNovelties[i] = computeNovelty(i);
+			// we find the least novel individual of the archive
+			auto a_i =
+			    std::distance(tmpNovelties.begin(),
+			                  std::min_element(tmpNovelties.begin(), tmpNovelties.end()));
+			// and replace it with a random pop one
+			size_t p_i = d(GA::globalRand());   // random ind position in population
+			size_t d_i = archive.size() + p_i;  // its pos in distanceMatrix (archive + pop)
 
-			// we replace them with random ind from the population
-			for (const auto &i : indices) archive[i] = population[d(GA::globalRand())];
+			//std::cerr << " -- Replacing " << json(archive[a_i].id).dump() << " with "
+					  //<< json(population[p_i].id).dump() << std::endl;
+
+			archive[a_i] = population[p_i];  // actual replacement
+
+			// then update the distanceMatrix
+
+			distanceMatrix[a_i] = distanceMatrix[d_i];  // we replace the row
+
+			for (size_t a = 0; a < distanceMatrix.size(); ++a)
+				distanceMatrix[a][a_i] = distanceMatrix[a][d_i];  // a_i column of the other rows
+
+			distanceMatrix[d_i][a_i] = 0;           // distance with itself = 0
+			assert(distanceMatrix[a_i][d_i] == 0);  // taken care of during for loop
 		}
 
-		for (int i = 0; i < toAdd; ++i) archive.push_back(population[d(GA::globalRand())]);
+		distanceMatrix.resize(archive.size());
+		for (auto &r : distanceMatrix) r.resize(archive.size());
+
+		// adding random ind
+		for (int i = 0; i < toAdd; ++i) {
+			size_t p_i = d(GA::globalRand());  // random ind position in population
+			archive.push_back(population[p_i]);
+		}
 	}
 
 	template <typename T> static inline std::string signatureToString(const T &f) {
@@ -315,13 +368,13 @@ template <typename GA> struct NoveltyExtension {
 	// try to append new individuals at the end of the archive vector, and replace rather
 	// than delete.
 
-	std::vector<Ind_t> prevArchive;
-	distanceMatrix_t prevDistanceMat;
+	distanceMatrix_t prevDM;
+	std::vector<Ind_t> prevAr;
 
 	template <typename SERVER>
 	distanceMatrix_t distributedComputeDistanceMatrix(const std::vector<Ind_t> &ar,
 	                                                  SERVER &server) {
-		// the distance matrix, first filled with zeros.
+		// the new distance matrix, first filled with zeros.
 		distanceMatrix_t dmat(ar.size(), std::vector<double>(ar.size()));
 
 		std::vector<size_t> unknown;
@@ -329,19 +382,22 @@ template <typename GA> struct NoveltyExtension {
 		known.reserve(prevArchive.size());
 		unknown.reserve(ar.size());
 
-		// finding id of the known & unknown individual (before which we don't need to
-		// recompute distances)
+		// finding id of the known & unknown individuals
 		for (size_t i = 0; i < ar.size(); ++i) {
-			if (i < prevArchive.size() && ar[i].id == prevArchive[i].id)
+			if (i < prevAr.size() && i < prevDM.size() && ar[i].id == prevAr[i].id) {
+				//std::cerr << json(ar[i].id).dump() << " already known" << std::endl;
 				known.push_back(i);
-			else
+			} else {
+				//std::cerr << json(ar[i].id).dump() << " UNKNOWN" << std::endl;
 				unknown.push_back(i);
+			}
 		}
 
+		//std::cerr << "unknown :" << unknown.size() << std::endl;
 		// we fill the new distmatrix with the distances we already know
 		for (const auto &i : known) {
 			for (const auto &j : known) {
-				const auto &d = prevDistanceMat[i][j];
+				const auto &d = prevDM[i][j];
 				dmat[i][j] = d;
 				dmat[j][i] = d;
 			}
@@ -359,9 +415,6 @@ template <typename GA> struct NoveltyExtension {
 		for (size_t k = 0; k < unknown.size(); ++k)
 			for (size_t j = k + 1; j < unknown.size(); ++j)
 				distancePairs.emplace_back(unknown[k], unknown[j]);
-
-		// std::cerr << "---firstNewId = " << firstNewId << "; computing "
-		//<< distancePairs.size() << " distances" << std::endl;
 
 		// we send the archive as extra content in the request, to each client.
 		auto archive_js = nlohmann::json::array();
@@ -390,9 +443,8 @@ template <typename GA> struct NoveltyExtension {
 
 		server.taskDispatch("DISTANCE", distancePairs, distanceResults, extra_js);
 
-		prevDistanceMat = dmat;
-		prevArchive = ar;
-
+		prevDM = dmat;
+		prevAr = ar;
 		return dmat;
 	}
 };

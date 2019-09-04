@@ -41,7 +41,7 @@ TEST_CASE("SQL") {
 	for (size_t i = 0; i < 10; ++i) {
 		ga.step();
 		sql.newGen(ga);  // saving the generation to sql
-		sql.exec("SELECT count(*) FROM individual;", [&](int argc, char** argv, char**) {
+		sql.exec("SELECT count(*) FROM individual;", [&](int, char** argv, char**) {
 			REQUIRE(std::atoi(argv[0]) == POPSIZE * (i + 1));
 		});
 
@@ -49,7 +49,7 @@ TEST_CASE("SQL") {
 		auto& prevPop = ga.previousGenerations.back();
 		query = "SELECT id,dna,infos FROM individual WHERE id_generation = " +
 		        std::to_string(i + 1) + " ORDER BY id ASC;";
-		sql.exec(query, [&](int argc, char** argv, char** col) {
+		sql.exec(query, [&](int, char** argv, char** col) {
 			REQUIRE(prevPop[ind_id].dna.serialize() == std::string(argv[1]));
 			REQUIRE(prevPop[ind_id].infos == std::string(argv[2]));
 			++ind_id;
@@ -71,7 +71,7 @@ TEST_CASE("SQL + Novelty") {
 	ga.useExtension(nov);
 
 	// SQL saver setup
-	SQLiteSaver<GA_t> sql(":memory:");  //:memory: is a keyword that triggers in memory DB
+	SQLiteSaver<GA_t> sql(":memory:");  //:memory: keyword that triggers in-memory DB
 	sql.useExtension(nov);
 	sql.newRun();  // ready to start saving a new evo run
 
@@ -96,23 +96,42 @@ TEST_CASE("SQL + Novelty") {
 	for (size_t i = 0; i < 10; ++i) {
 		ga.step();
 		sql.newGen(ga);  // saving the generation to sql
-		sql.exec("SELECT count(*) FROM individual;", [&](int argc, char** argv, char**) {
+		sql.exec("SELECT count(*) FROM individual;", [&](int, char** argv, char**) {
 			REQUIRE(std::atoi(argv[0]) == POPSIZE * (i + 1));
 		});
 
 		size_t ind_id = 0;
 		auto& prevPop = ga.previousGenerations.back();
 		std::string query =
-		    "SELECT id,dna,infos,signature,archived FROM individual WHERE id_generation = " +
+		    "SELECT id,dna,infos,signature,original_id FROM individual WHERE id_generation "
+		    "= " +
 		    std::to_string(i + 1) + " ORDER BY id ASC;";
-		sql.exec(query, [&](int argc, char** argv, char** col) {
+		sql.exec(query, [&](int, char** argv, char**) {
 			REQUIRE(prevPop[ind_id].dna.serialize() == std::string(argv[1]));
 			REQUIRE(prevPop[ind_id].infos == std::string(argv[2]));
 			nlohmann::json jsSig = prevPop[ind_id].signature;
 			REQUIRE(jsSig.dump() == std::string(argv[3]));
 			REQUIRE(jsSig == nlohmann::json(prevPop[ind_id].dna.values));
-			REQUIRE(nov.isArchived(prevPop[ind_id]) == (bool)(std::atoi(argv[4])));
+			REQUIRE(ind_id == std::atoi(argv[4]));
 			++ind_id;
 		});
+
+		////// archive tests
+		{
+			query =
+			    "SELECT id_individual, individual.id_generation, individual.original_id FROM "
+			    "archive_content, "
+			    "individual WHERE "
+			    "id_individual = individual.id AND archive_content.id_generation = " +
+			    std::to_string(i + 1) + ";";
+
+			int c = 0;
+			sql.exec(query, [&](int, char** argv, char**) {
+				REQUIRE(nov.isArchived(std::pair<size_t, size_t>(
+				            std::atoi(argv[1]) - 1, (size_t)std::atoi(argv[2]))) == true);
+				c++;
+			});
+			REQUIRE(c == nov.archive.size());
+		}
 	}
 }
