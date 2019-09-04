@@ -259,6 +259,7 @@ template <typename DNA, typename Ind = Individual<DNA>> class GA {
 	 ********************************************************************************/
  public:
 	void enablePopulationSave() { savePopEnabled = true; }
+	void disablePopulationSave() { savePopEnabled = false; }
 	void setVerbosity(unsigned int lvl) { verbosity = lvl <= 3 ? (lvl >= 0 ? lvl : 0) : 3; }
 	void setPopSize(size_t s) { popSize = s; }
 	size_t getPopSize() const { return popSize; }
