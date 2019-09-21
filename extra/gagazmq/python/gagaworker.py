@@ -49,7 +49,6 @@ class GAGAWorker:
                 self.socket.recv() #ACK
 
             elif rep['req'] == 'DISTANCE': # Distance computations for novelty
-                print("DISTANCE")
                 signatures = [i['signature'] for i in rep['extra']['archive']]
                 distances = [i for i in rep['tasks']]
                 logging.info("[WORKER %s] - Received %d distances computations for %d signatures", self.identity, len(rep['tasks']), len(signatures));
@@ -63,8 +62,8 @@ class GAGAWorker:
                 self.socket.recv() #ACK
 
             elif rep['req'] == 'STOP':
-                print("Received STOP request, exiting")
+                logging.info("Received STOP request, exiting")
                 break;
 
             else :
-                print("[WARNING] Received unknown request:",strRep.decode('utf-8'))
+                logging.warning("Received unknown request:",strRep.decode('utf-8'))
