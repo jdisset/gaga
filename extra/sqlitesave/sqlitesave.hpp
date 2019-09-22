@@ -119,7 +119,6 @@ template <typename GA> struct SQLiteSaver {
 			sql += " ?" + std::to_string(i++) + ",";
 		sql += " ?" + std::to_string(i) + ");";
 		sqlite3_stmt *stmt;
-		const size_t LAST_COL = i;
 		prepare(sql, &stmt);
 
 		for (const auto &ind : population) {
@@ -130,7 +129,6 @@ template <typename GA> struct SQLiteSaver {
 			for (const auto &c : extraIndividualColumns) std::get<2>(c)(ind, *this, i++, stmt);
 
 			sqbind(stmt, i++, ind.id.second);  // original id
-			assert(i == LAST_COL);
 			sqbind(stmt, i, idGeneration);
 			step(stmt);
 			size_t idInd = sqlite3_last_insert_rowid(db);
@@ -187,7 +185,7 @@ template <typename GA> struct SQLiteSaver {
 
 		insertNewGeneration(ga);
 		size_t idGeneration = generationIds.back();
-		size_t generationNumber = ga.getCurrentGenerationNumber() - 1;
+		// size_t generationNumber = ga.getCurrentGenerationNumber() - 1;
 		insertAllIndividuals(idGeneration, ga);
 		assert(gagaToSQLiteIds.size() == generationNumber + 1);
 

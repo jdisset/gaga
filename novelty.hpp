@@ -145,7 +145,7 @@ template <typename GA> struct NoveltyExtension {
 			archiveSQLId = sql.getLastInsertId();
 		};
 
-		auto onNewGen = [&](auto &sql, const auto &ga) {
+		auto onNewGen = [&](auto &sql, const auto &) {
 			// insert current archive individuals
 			std::string archSQL =
 			    "INSERT INTO archive_content"
@@ -303,8 +303,8 @@ template <typename GA> struct NoveltyExtension {
 			size_t p_i = d(GA::globalRand());   // random ind position in population
 			size_t d_i = archive.size() + p_i;  // its pos in distanceMatrix (archive + pop)
 
-			//std::cerr << " -- Replacing " << json(archive[a_i].id).dump() << " with "
-					  //<< json(population[p_i].id).dump() << std::endl;
+			// std::cerr << " -- Replacing " << json(archive[a_i].id).dump() << " with "
+			//<< json(population[p_i].id).dump() << std::endl;
 
 			archive[a_i] = population[p_i];  // actual replacement
 
@@ -385,15 +385,15 @@ template <typename GA> struct NoveltyExtension {
 		// finding id of the known & unknown individuals
 		for (size_t i = 0; i < ar.size(); ++i) {
 			if (i < prevAr.size() && i < prevDM.size() && ar[i].id == prevAr[i].id) {
-				//std::cerr << json(ar[i].id).dump() << " already known" << std::endl;
+				// std::cerr << json(ar[i].id).dump() << " already known" << std::endl;
 				known.push_back(i);
 			} else {
-				//std::cerr << json(ar[i].id).dump() << " UNKNOWN" << std::endl;
+				// std::cerr << json(ar[i].id).dump() << " UNKNOWN" << std::endl;
 				unknown.push_back(i);
 			}
 		}
 
-		//std::cerr << "unknown :" << unknown.size() << std::endl;
+		// std::cerr << "unknown :" << unknown.size() << std::endl;
 		// we fill the new distmatrix with the distances we already know
 		for (const auto &i : known) {
 			for (const auto &j : known) {

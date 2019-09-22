@@ -1647,7 +1647,7 @@ template <typename DNA, typename Ind = Individual<DNA>> class GA {
 		if (baseFolder.back() != '/') baseFolder += "/";
 		struct stat sb;
 		char bFChar[500];
-		strncpy(bFChar, baseFolder.c_str(), 500);
+		strncpy(bFChar, baseFolder.c_str(), 500 - 1);
 		mkPath(bFChar);
 		auto now = system_clock::now();
 		time_t now_c = system_clock::to_time_t(now);
