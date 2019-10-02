@@ -5,3 +5,4 @@ evos
 *.gch*
 *.pyc
 __pycache__
+bin
