@@ -1,5 +1,6 @@
 #pragma once
 #include <sqlite3.h>
+
 #include <cassert>
 #include <functional>
 #include <iostream>
@@ -45,6 +46,7 @@ template <typename GA> struct SQLiteSaver {
 	SQLiteSaver(std::string dbfile) {
 		if (sqlite3_open(dbfile.c_str(), &db)) throw std::runtime_error(sqlite3_errmsg(db));
 	}
+	~SQLiteSaver() { sqlite3_close(db); }
 
 	void createTables() {
 		if (!db) throw std::invalid_argument("db pointer is null");
@@ -185,9 +187,8 @@ template <typename GA> struct SQLiteSaver {
 
 		insertNewGeneration(ga);
 		size_t idGeneration = generationIds.back();
-		// size_t generationNumber = ga.getCurrentGenerationNumber() - 1;
 		insertAllIndividuals(idGeneration, ga);
-		assert(gagaToSQLiteIds.size() == generationNumber + 1);
+		assert(gagaToSQLiteIds.size() == ga.getCurrentGenerationNumber());
 
 		{  // insert evaluations
 			std::string sql =
