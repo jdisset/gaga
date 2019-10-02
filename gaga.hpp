@@ -28,7 +28,6 @@
 
 #include <assert.h>
 #include <sys/stat.h>
-//#include <sys/types.h>
 #include <algorithm>
 #include <chrono>
 #include <cstring>
@@ -46,6 +45,9 @@
 #include <vector>
 #include "third_party/cxxpool.hpp"
 #include "third_party/json.hpp"
+#ifdef _WIN32
+#include <direct.h>  // required for _mkdir()
+#endif
 
 #define GAGA_COLOR_PURPLE "\033[35m"
 #define GAGA_COLOR_PURPLEBOLD "\033[1;35m"
@@ -233,7 +235,7 @@ template <typename DNA, typename Ind = Individual<DNA>> class GA {
 	double crossoverRate = 0.2;              // crossover probability
 	double mutationRate = 0.5;               // mutation probablility
 	bool evaluateAllIndividuals = false;     // force evaluation of every individual
-	bool doSaveParetoFront = false;          // save the pareto front
+	bool doSaveParetoFront = true;          // save the pareto front
 	bool doSaveGenStats = true;              // save generations stats to csv file
 	bool doSaveIndStats = false;             // save individuals stats to csv file
 	bool saveAllPreviousGenerations = true;  // save all previous generations in memory
