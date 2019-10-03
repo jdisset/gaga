@@ -28,6 +28,7 @@
 
 #include <assert.h>
 #include <sys/stat.h>
+
 #include <algorithm>
 #include <chrono>
 #include <cstring>
@@ -43,6 +44,7 @@
 #include <unordered_set>
 #include <utility>
 #include <vector>
+
 #include "third_party/cxxpool.hpp"
 #include "third_party/json.hpp"
 #ifdef _WIN32
@@ -235,23 +237,11 @@ template <typename DNA, typename Ind = Individual<DNA>> class GA {
 	double crossoverRate = 0.2;              // crossover probability
 	double mutationRate = 0.5;               // mutation probablility
 	bool evaluateAllIndividuals = false;     // force evaluation of every individual
-	bool doSaveParetoFront = true;          // save the pareto front
+	bool doSaveParetoFront = true;           // save the pareto front
 	bool doSaveGenStats = true;              // save generations stats to csv file
 	bool doSaveIndStats = false;             // save individuals stats to csv file
 	bool saveAllPreviousGenerations = true;  // save all previous generations in memory
 	SelectionMethod selecMethod = SelectionMethod::paretoTournament;
-	// for speciation:
-	bool speciation = false;           // enable speciation
-	double speciationThreshold = 0.2;  // min distance between two dna of same specie
-	size_t minSpecieSize = 15;         // minimum specie size
-	double minSpeciationThreshold = 0.03;
-	double maxSpeciationThreshold = 0.5;
-	double speciationThresholdIncrement = 0.01;
-	std::function<double(const Ind_t &, const Ind_t &)> indDistanceFunction =
-	    [](const auto &, const auto &) { return 0.0; };
-	const unsigned int MAX_SPECIATION_TRIES = 100;
-	std::vector<double> speciationThresholds;  // spec thresholds per specie
-
 	// thread pool
 	unsigned int nbThreads = 1;
 	cxxpool::thread_pool tp{nbThreads};
@@ -346,34 +336,7 @@ template <typename DNA, typename Ind = Individual<DNA>> class GA {
 	std::vector<Ind_t> population;                        // current population
 	std::vector<std::vector<Ind_t>> previousGenerations;  // previous generations. Contains
 	                                                      // at least the most recent one.
-
-	// for speciation:
-	void enableSpeciation() {
-		nextGeneration = [this]() { speciationNextGen(); };
-		speciation = true;
-	}
-	void disableSpeciation() {
-		nextGeneration = [this]() { classicNextGen(); };
-		speciation = false;
-	}
-
-	bool speciationEnabled() { return speciation; }
-	void setMinSpeciationThreshold(double s) { minSpeciationThreshold = s; }
-	double getMinSpeciationThreshold() { return minSpeciationThreshold; }
-	void setMaxSpeciationThreshold(double s) { maxSpeciationThreshold = s; }
-	double getMaxSpeciationThreshold() { return maxSpeciationThreshold; }
-	void setSpeciationThreshold(double s) { speciationThreshold = s; }
-	double getSpeciationThreshold() { return speciationThreshold; }
-	void setSpeciationThresholdIncrement(double s) { speciationThresholdIncrement = s; }
-	double getSpeciationThresholdIncrement() { return speciationThresholdIncrement; }
-	void setMinSpecieSize(double s) { minSpecieSize = s; }
-	double getMinSpecieSize() { return minSpecieSize; }
-	void setIndDistanceFunction(std::function<double(const Ind_t &, const Ind_t &)> f) {
-		indDistanceFunction = f;
-	}
 	size_t getCurrentGenerationNumber() const { return currentGeneration; }
-
-	std::vector<std::vector<Iptr>> species;  // pointers to the individuals of the species
 
 	// genStats will be populated with some basic generation stats
 	std::vector<std::map<std::string, std::map<std::string, double>>> genStats;
@@ -459,9 +422,14 @@ template <typename DNA, typename Ind = Individual<DNA>> class GA {
 	// pre / post Evaluation
 	std::vector<std::function<void(GA &)>> preEvaluation_hooks;
 	std::vector<std::function<void(GA &)>> postEvaluation_hooks;
-	// enabled objectives
+
+	// enabled objectives hooks is meant to allow extensions to manipulate the list of
+	// objectives.
+	// "disabled" objectives are not deleted, they just don't appear in the list
+	// of enabled ones
 	std::vector<std::function<void(GA &, std::unordered_set<std::string> &)>>
 	    enabledObjectives_hooks;
+
 	// save pop
 	std::vector<std::function<void(GA &)>> savePop_hooks;
 	// printStart : prints stuff at startup
@@ -472,6 +440,8 @@ template <typename DNA, typename Ind = Individual<DNA>> class GA {
 
 	// register an extension with this method:
 
+	// evaluation is the main step of the evaluation phase. It can be extended using the pre
+	// and postEvaluation hooks
 	void evaluation() {
 		for (auto &f : preEvaluation_hooks) f(*this);
 		evaluate();
@@ -527,14 +497,28 @@ template <typename DNA, typename Ind = Individual<DNA>> class GA {
 
 	template <typename... Args> void printError(Args &&... a) {
 		const size_t ERROR_VERBOSITY_LVL = 1;
-		printLn(ERROR_VERBOSITY_LVL, GAGA_COLOR_RED, "[ERROR] ", GAGA_COLOR_NORMAL,
-		        std::forward<Args>(a)...);
+		printLn_stderr(ERROR_VERBOSITY_LVL, GAGA_COLOR_RED, "[ERROR] ", GAGA_COLOR_NORMAL,
+		               std::forward<Args>(a)...);
 	}
 
 	template <typename... Args> void printWarning(Args &&... a) {
 		const size_t WARNING_VERBOSITY_LVL = 2;
 		printLn(WARNING_VERBOSITY_LVL, GAGA_COLOR_YELLOW, "[WARNING] ", GAGA_COLOR_NORMAL,
 		        std::forward<Args>(a)...);
+	}
+
+	template <typename... Args> void printDbg(Args &&... a) {
+		const size_t DEBUG_VERBOSITY_LVL = 2;
+		printLn_stderr(DEBUG_VERBOSITY_LVL, GAGA_COLOR_BLUE, "[DBG] ", GAGA_COLOR_NORMAL,
+		               std::forward<Args>(a)...);
+	}
+
+	template <typename... Args> void printLn_stderr(size_t lvl, Args &&... a) {
+		if (verbosity >= lvl) {
+			std::ostringstream output;
+			subPrint(output, std::forward<Args>(a)...);
+			std::cerr << output.str();
+		}
 	}
 
 	template <typename... Args> void printLn(size_t lvl, Args &&... a) {
@@ -627,291 +611,37 @@ template <typename DNA, typename Ind = Individual<DNA>> class GA {
 		for (const auto &o : i.fitnesses) objs.insert(o.first);
 		return objs;
 	}
+
+	template <typename I> std::unordered_set<std::string> getEnabledObjectives(const I &i) {
+		auto objectives = getAllObjectives(i);
+		for (auto &f : enabledObjectives_hooks) f(*this, objectives);  // hook
+		return objectives;
+	}
+
 	/*********************************************************************************
 	 *                            NEXT POP GETTING READY
 	 ********************************************************************************/
+	// Simple next generation routine:
 	void classicNextGen() {
 		assert(population.size() > 0);
-		// simple next generation routine:
-		//
-		// 1 - evaluation
-		evaluation();
 
-		// 2 - selection with mutations/crossovers
-		//
-		// pick which objectives should be used for selection
-		// (default = all, can be changed by extensions)
-		auto objectives = getAllObjectives(population[0]);
-		for (auto &f : enabledObjectives_hooks) f(*this, objectives);  // hook
-		// create next generation
+		evaluation();  // 1 - evaluation
+
+		// 2- create next generation with select/mutate/cross
+		auto objectives = getEnabledObjectives(population[0]);
 		auto nextGen = produceNOffsprings(popSize, population, nbElites, objectives);
-		// save old gen, next gen becomes current one,.
+
+		// 3 -  save old gen, next gen becomes current one,.
 		savePopToPreviousGenerations(population);
 		population = nextGen;
 		setPopulationId(population, currentGeneration + 1);
-		if (verbosity >= 3) cerr << "Next generation ready" << endl;
+
+		printDbg("Next generation ready");
 	}
 
 	void setPopulationId(std::vector<Ind_t> &p, size_t genId) {
 		// reinitialize individuals' id to a pair {genId , 0 to N}
 		for (size_t i = 0; i < p.size(); ++i) p[i].id = std::make_pair(genId, i);
-	}
-
-	void speciationNextGen() {
-		// next generation routine with speciation
-		// - evaluation de toute la pop, sans se soucier des espèces.
-		// - choix des nouveaux représentants parmis les espèces précédentes (clonage)
-		// - création d'une nouvelle population via selection/mutation/crossover
-		// intra-espece
-		// - regroupement en nouvelles espèces en utilisant la distance aux représentants
-		// (création d'une nouvelle espèce si distance < speciationThreshold)
-		// - on supprime les espèces de taille < minSpecieSize
-		// - on rajoute des individus en les faisant muter depuis une espèce aléatoire
-		// (nouvelle espèce à chaque tirage) et en les rajoutants à cette espèce
-		// - c'est reparti :D
-
-		// TODO : for now it only works with maximization
-		// minimization would require a modification in the nOffsprings
-		// and in the worstFitness computations
-
-		evaluation();
-
-		auto objectives = getAllObjectives(population[0]);
-		for (auto &f : enabledObjectives_hooks) f(*this, objectives);  // hook
-
-		if (verbosity >= 3) cerr << "Starting to prepare next speciated gen" << std::endl;
-		assert(nbElites < minSpecieSize);
-
-		if (species.size() == 0) {
-			if (verbosity >= 3) cerr << "No specie available, creating one" << std::endl;
-			// we put all the population in one species
-			species.resize(1);
-			for (auto &i : population) species[0].push_back(&i);
-			speciationThresholds.clear();
-			speciationThresholds.resize(1);
-			speciationThresholds[0] = speciationThreshold;
-		}
-
-		assert(species.size() == speciationThresholds.size());
-
-		std::vector<Ind_t> nextLeaders;
-		// New species leaders
-		for (auto &s : species) {
-			assert(s.size() > 0);
-			std::uniform_int_distribution<size_t> d(0, s.size() - 1);
-			nextLeaders.push_back(*s[d(globalRand())]);
-		}
-		if (verbosity >= 3)
-			cerr << "Found " << nextLeaders.size() << " leaders :" << std::endl;
-
-		// list of objectives
-		unordered_set<string> objectivesList;
-		for (const auto &o : population[0].fitnesses) objectivesList.insert(o.first);
-		assert(objectivesList.size() > 0);
-		if (verbosity >= 3)
-			cerr << "Found " << objectivesList.size() << " objectives" << std::endl;
-
-		// computing afjustedFitnesses
-		std::vector<unordered_map<string, double>> adjustedFitnessSum(species.size());
-		unordered_map<string, double> worstFitness;
-		for (const auto &o : objectivesList) {
-			worstFitness[o] = std::numeric_limits<double>::max();
-			for (const auto &i : population)
-				if (i.fitnesses.at(o) < worstFitness.at(o)) worstFitness[o] = i.fitnesses.at(o);
-		}
-		// we want to offset all the adj fitnesses so they are in the positive range
-		unordered_map<string, double> totalAdjustedFitness;
-		for (const auto &o : objectivesList) {
-			double total = 0;
-			for (size_t i = 0; i < species.size(); ++i) {
-				const auto &s = species[i];
-				assert(s.size() > 0);
-				double sum = 0;
-				for (const auto &ind : s) sum += ind->fitnesses.at(o) - worstFitness.at(o) + 1;
-				sum /= static_cast<double>(s.size());
-				total += sum;
-				adjustedFitnessSum[i][o] = sum;
-			}
-			totalAdjustedFitness[o] = total;
-		}
-		if (verbosity >= 3) {
-			for (auto &af : totalAdjustedFitness) {
-				cerr << " - total \"" << af.first << "\" = " << af.second << std::endl;
-			}
-		}
-
-		// creating the new population
-		std::vector<Ind_t> nextGen;
-		for (const auto &o : objectivesList) {
-			assert(totalAdjustedFitness[o] != 0);
-			for (size_t i = 0; i < species.size(); ++i) {
-				auto &s = species[i];
-				size_t nOffsprings =  // nb of offsprings the specie is authorized to produce
-				    static_cast<size_t>((static_cast<double>(popSize) /
-				                         static_cast<double>(objectivesList.size())) *
-				                        adjustedFitnessSum[i][o] / totalAdjustedFitness[o]);
-
-				nOffsprings = std::max(static_cast<size_t>(nOffsprings), 1ul);
-				nextGen.reserve(nextGen.size() + nOffsprings);
-
-				auto specieOffsprings = produceNOffsprings(nOffsprings, s, nbElites);
-				nextGen.insert(nextGen.end(), std::make_move_iterator(specieOffsprings.begin()),
-				               std::make_move_iterator(specieOffsprings.end()));
-			}
-		}
-		savePopToPreviousGenerations(population);
-		population = nextGen;
-		setPopulationId(population, currentGeneration + 1);
-
-		if (verbosity >= 3)
-			cerr << "Created the new population. Population.size = " << population.size()
-			     << std::endl;
-
-		// correcting rounding errors by adding missing individuals
-		while (population.size() < popSize) {  // we just add mutated leaders
-			std::uniform_int_distribution<size_t> d(0, nextLeaders.size() - 1);
-			population.push_back(mutatiedIndividual(nextLeaders[d(globalRand())]));
-		}
-		while (population.size() > popSize) population.pop_back();  // or delete the extra
-
-		assert(population.size() == popSize);
-
-		// reevaluating the new guys
-		evaluation();
-
-		// creating new species
-		species.clear();
-		species.resize(nextLeaders.size());
-		assert(species.size() > 0);
-		for (auto &i : population) {
-			// finding the closest leader
-			size_t closestLeader = 0;
-			double closestDist = std::numeric_limits<double>::max();
-			bool foundSpecie = false;
-			std::vector<double> distances(nextLeaders.size());
-
-			std::vector<std::future<void>> futures;
-			for (size_t l = 0; l < nextLeaders.size(); ++l)
-				futures.push_back(tp.push([=, &distances, &nextLeaders]() {
-					distances[l] = indDistanceFunction(nextLeaders[l], i);
-				}));
-			for (auto &f : futures) f.get();
-
-			for (size_t d = 0; d < distances.size(); ++d) {
-				if (distances[d] < closestDist && distances[d] < speciationThresholds[d]) {
-					closestDist = distances[d];
-					closestLeader = d;
-					foundSpecie = true;
-				}
-			}
-			if (foundSpecie) {
-				// we found your family
-				species[closestLeader].push_back(&i);
-			} else {
-				// we found special snowflakes
-				nextLeaders.push_back(i);
-				species.push_back({{&i}});
-				speciationThresholds.push_back(speciationThreshold);
-			}
-		}
-		if (verbosity >= 3)
-			cerr << "Created the new species. Species size = " << species.size() << std::endl;
-
-		assert(species.size() > 0);
-		assert(species.size() == nextLeaders.size());
-		assert(species.size() == speciationThresholds.size());
-
-		// deleting small species
-		std::vector<Iptr>
-		    toReplace;  // list of individuals without specie. We need to replace
-		                // them with new individuals. We use this because we
-		                // cannot directly delete individuals from the population
-		                // without invalidating all other pointers;
-		size_t cpt = 0;
-
-		if (verbosity >= 3) {
-			cerr << "Species sizes : " << std::endl;
-			for (auto &s : species) {
-				cerr << " - " << s.size() << std::endl;
-			}
-		}
-
-		for (auto it = species.begin(); it != species.end();) {
-			if ((*it).size() < minSpecieSize && species.size() > 1) {
-				for (auto &i : *it) toReplace.push_back(i);
-				it = species.erase(it);
-				nextLeaders.erase(nextLeaders.begin() + cpt);
-				speciationThresholds.erase(speciationThresholds.begin() + cpt);
-			} else {
-				++it;
-				++cpt;
-			}
-		}
-
-		assert(species.size() > 0);
-		assert(species.size() == nextLeaders.size());
-		assert(species.size() == speciationThresholds.size());
-		assert(species.size() <= popSize / minSpecieSize);
-
-		if (verbosity >= 3) {
-			cerr << "Need to replace " << toReplace.size() << " individuals" << std::endl;
-			for (auto &i : toReplace) {
-				cerr << " : " << i << ", f = " << i->fitnesses.size() << std::endl;
-			}
-		}
-
-		std::vector<std::future<void>> futures;
-		// replacing all "deleted" individuals and putting them in existing species
-		for (size_t tr = 0; tr < toReplace.size(); ++tr) {
-			futures.push_back(tp.push([&, tr]() {
-				auto &i = toReplace[tr];
-				// we choose one random specie and mutate
-				// individuals until the new ind can fit
-				auto selection = getSelectionMethod<std::vector<Iptr>>();
-				std::uniform_int_distribution<size_t> d(0, nextLeaders.size() - 1);
-				size_t leaderID = d(globalRand());
-				unsigned int c = 0;
-				do {
-					if (c++ > MAX_SPECIATION_TRIES)
-						throw std::runtime_error("Too many tries. Speciation thresholds too low.");
-
-					// TODO selection is not ideal here. The species hasnt been entirely evaluated.
-					*i = mutatedIndividual(*selection(species[leaderID]));
-				} while (indDistanceFunction(*i, nextLeaders[leaderID]) >
-				         speciationThresholds[leaderID]);
-			}));
-		}
-		for (auto &f : futures) f.get();
-
-		if (verbosity >= 3) cerr << "Done. " << std::endl;
-		// adjusting speciation Thresholds
-		size_t avgSpecieSize = 0;
-		for (auto &s : species) avgSpecieSize += s.size();
-		avgSpecieSize /= species.size();
-		for (size_t i = 0; i < species.size(); ++i) {
-			if (species[i].size() < avgSpecieSize) {
-				speciationThresholds[i] =
-				    std::min(speciationThresholds[i] + speciationThresholdIncrement,
-				             maxSpeciationThreshold);
-			} else {
-				speciationThresholds[i] =
-				    std::max(speciationThresholds[i] - speciationThresholdIncrement,
-				             minSpeciationThreshold);
-			}
-		}
-		if (verbosity >= 3) {
-			cerr << "Speciation thresholds adjusted: " << std::endl;
-			for (auto &s : speciationThresholds) {
-				cerr << " " << s;
-			}
-			cerr << std::endl;
-			cerr << "Species sizes : " << std::endl;
-			for (auto &s : species) {
-				cerr << " - " << s.size() << std::endl;
-			}
-		}
-
-		setPopulationId(population, currentGeneration + 1);
 	}
 
 	template <typename I>  // I is ither Ind_t or Ind_t*
@@ -1183,23 +913,6 @@ template <typename DNA, typename Ind = Individual<DNA>> class GA {
 		          << GAGA_COLOR_NORMAL << std::endl;
 		std::cout << "  ▹ writing results in " << GAGA_COLOR_BLUE << folder
 		          << GAGA_COLOR_NORMAL << std::endl;
-		if (speciation) {
-			std::cout << "  ▹ speciation is " << GAGA_COLOR_GREEN << "enabled"
-			          << GAGA_COLOR_NORMAL << std::endl;
-			std::cout << "    - minSpecieSize size = " << GAGA_COLOR_BLUE << minSpecieSize
-			          << GAGA_COLOR_NORMAL << std::endl;
-			std::cout << "    - speciationThreshold = " << GAGA_COLOR_BLUE
-			          << speciationThreshold << GAGA_COLOR_NORMAL << std::endl;
-			std::cout << "    - speciationThresholdIncrement = " << GAGA_COLOR_BLUE
-			          << speciationThresholdIncrement << GAGA_COLOR_NORMAL << std::endl;
-			std::cout << "    - minSpeciationThreshold = " << GAGA_COLOR_BLUE
-			          << minSpeciationThreshold << GAGA_COLOR_NORMAL << std::endl;
-			std::cout << "    - maxSpeciationThreshold = " << GAGA_COLOR_BLUE
-			          << maxSpeciationThreshold << GAGA_COLOR_NORMAL << std::endl;
-		} else {
-			std::cout << "  ▹ speciation is " << GAGA_COLOR_RED << "disabled"
-			          << GAGA_COLOR_NORMAL << std::endl;
-		}
 		for (int i = 0; i < nbCol - 1; ++i) std::cout << "━";
 		std::cout << std::endl;
 		for (auto &f : printStart_hooks) f(*this);
@@ -1270,9 +983,6 @@ template <typename DNA, typename Ind = Individual<DNA>> class GA {
 		currentGenStats["global"]["maxTime"] = maxTime;
 		currentGenStats["global"]["nEvals"] = nEvals;
 		currentGenStats["global"]["nObjs"] = nObjs;
-		if (speciation) {
-			currentGenStats["global"]["nSpecies"] = species.size();
-		}
 		genStats.push_back(currentGenStats);
 	}
 
@@ -1301,7 +1011,6 @@ template <typename DNA, typename Ind = Individual<DNA>> class GA {
 		output = std::ostringstream();
 		output << GAGA_COLOR_GREYBOLD << "(" << globalStats.at("nEvals") << " evaluations, "
 		       << globalStats.at("nObjs") << " objs";
-		if (speciation) output << ", " << species.size() << " species";
 		output << ")" << GAGA_COLOR_NORMAL;
 		std::cout << tableCenteredText(l, output.str(),
 		                               GAGA_COLOR_GREYBOLD GAGA_COLOR_NORMAL);
