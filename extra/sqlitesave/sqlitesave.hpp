@@ -46,7 +46,6 @@ template <typename GA> struct SQLiteSaver {
 	SQLiteSaver(std::string dbfile) {
 		if (sqlite3_open(dbfile.c_str(), &db)) throw std::runtime_error(sqlite3_errmsg(db));
 	}
-	~SQLiteSaver() { sqlite3_close(db); }
 
 	void createTables() {
 		if (!db) throw std::invalid_argument("db pointer is null");
@@ -306,7 +305,5 @@ template <typename GA> struct SQLiteSaver {
 		sqlite3_reset(stmt);
 	}
 
-	~SQLiteSaver() {
-		if (db) sqlite3_close(db);
-	}
+	~SQLiteSaver() { sqlite3_close(db); }
 };
