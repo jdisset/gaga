@@ -198,19 +198,6 @@ template <typename DNA, typename Ind> void from_json(const nlohmann::json &j, In
 /*********************************************************************************
  *                                 GA CLASS
  ********************************************************************************/
-// DNA requirements : see Individual class;
-//
-// Evaluator class requirements (see examples folder):
-// constructor(int argc, char** argv)
-// void operator()(const Ind_t& ind)
-// const string name
-//
-// TYPICAL USAGE :
-//
-// GA<DNAType, EvalType> ga;
-// ga.setPopSize(400);
-// return ga.start();
-
 enum class SelectionMethod { paretoTournament, randomObjTournament };
 template <typename DNA, typename Ind = Individual<DNA>> class GA {
  public:
@@ -224,7 +211,7 @@ template <typename DNA, typename Ind = Individual<DNA>> class GA {
 	     *                            MAIN GA SETTINGS
 	     ********************************************************************************/
 	    unsigned int verbosity = 2;          // 0 = silent; 1 = generations stats;
-	                                         // 2 = individuals stats; 3 = everything
+	                                         // 2 = individuals stats + warnings; 3 = debug
 	size_t popSize = 500;                    // nb of individuals in the population
 	size_t nbElites = 1;                     // nb of elites to keep accross generations
 	size_t nbSavedElites = 1;                // nb of elites to save
@@ -232,7 +219,7 @@ template <typename DNA, typename Ind = Individual<DNA>> class GA {
 	bool savePopEnabled = true;              // save the whole population
 	unsigned int savePopInterval = 1;        // interval between 2 whole population saves
 	unsigned int saveGenInterval = 1;        // interval between 2 elites/pareto saves
-	string folder = "../evos/";              // where to save the results
+	string folder = "evos/";                 // where to save the results
 	string evaluatorName;                    // name of the given evaluator func
 	double crossoverRate = 0.2;              // crossover probability
 	double mutationRate = 0.5;               // mutation probablility
@@ -386,6 +373,7 @@ template <typename DNA, typename Ind = Individual<DNA>> class GA {
 	    [this](const DNA_t &d1, const DNA_t &d2) { return defaultCrossover(d1, d2); };
 	std::function<void(DNA_t &)> mutate = [this](DNA_t &d) { defaultMutate(d); };
 
+	// wrapper around mutate that updates lineage stats
 	Ind_t mutatedIndividual(const Ind_t &i) {
 		Ind_t offspring(i.dna);
 		mutate(offspring.dna);
@@ -396,6 +384,7 @@ template <typename DNA, typename Ind = Individual<DNA>> class GA {
 		return offspring;
 	}
 
+	// wrapper around crossover that updates lineage stats
 	Ind_t crossoverIndividual(const Ind_t &a, const Ind_t &b) {
 		Ind_t offspring(crossover(a.dna, b.dna));
 		offspring.parents.clear();
