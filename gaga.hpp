@@ -45,8 +45,8 @@
 #include <utility>
 #include <vector>
 
-#include "third_party/cxxpool.hpp"
 #include "third_party/json.hpp"
+#include "tinypool.hpp"
 #ifdef _WIN32
 #include <direct.h>  // required for _mkdir()
 #endif
@@ -228,10 +228,13 @@ template <typename DNA, typename Ind = Individual<DNA>> class GA {
 	bool doSaveGenStats = true;              // save generations stats to csv file
 	bool doSaveIndStats = false;             // save individuals stats to csv file
 	bool saveAllPreviousGenerations = true;  // save all previous generations in memory
+	// (might cause mem bloat if individuals contains LOTS of data)
+
 	SelectionMethod selecMethod = SelectionMethod::paretoTournament;
-	// thread pool
+
+	// thread pool (feel free to use it for your own computations)
 	unsigned int nbThreads = 1;
-	cxxpool::thread_pool tp{nbThreads};
+	TinyPool::ThreadPool tp{nbThreads};
 
 	/********************************************************************************
 	 *                                 SETTERS
@@ -251,12 +254,9 @@ template <typename DNA, typename Ind = Individual<DNA>> class GA {
 	void setSaveFolder(std::string s) { folder = s; }
 	std::string getSaveFolder() const { return folder; }
 	void setNbThreads(unsigned int n) {
-		if (n >= nbThreads)
-			tp.add_threads(n - nbThreads);
-		else {
-			std::cerr << "cannot remove threads from thread pool" << std::endl;
-		}
-		nbThreads = n;
+		if (n == 0) printWarning("Can't use 0 threads! Using 1 instead.");
+		nbThreads = std::max(1u, n);
+		tp.reset(nbThreads);
 	}
 	void setCrossoverRate(double p) {
 		crossoverRate = p <= 1.0 ? (p >= 0.0 ? p : 0.0) : 1.0;
@@ -340,7 +340,6 @@ template <typename DNA, typename Ind = Individual<DNA>> class GA {
 
 	    size_t currentGeneration = 0;
 	bool customInit = false;
-	int procId = 0;
 	int nbProcs = 1;
 
 	// default mutate and crossover are taken from the DNA_t class, if they are defined.
@@ -465,76 +464,29 @@ template <typename DNA, typename Ind = Individual<DNA>> class GA {
 	}
 
 	void setPopulation(const std::vector<Ind_t> &p) {
-		if (procId == 0) {
-			population = p;
-			popSize = population.size();
-		}
+		population = p;
+		popSize = population.size();
 		setPopulationId(population, currentGeneration);
 	}
 
 	void initPopulation(const std::function<DNA()> &f) {
-		if (procId == 0) {
-			population.clear();
-			population.reserve(popSize);
-			for (size_t i = 0; i < popSize; ++i) {
-				population.push_back(Ind_t(f()));
-				population[population.size() - 1].evaluated = false;
-			}
+		population.clear();
+		population.reserve(popSize);
+		for (size_t i = 0; i < popSize; ++i) {
+			population.push_back(Ind_t(f()));
+			population[population.size() - 1].evaluated = false;
 		}
 		setPopulationId(population, currentGeneration);
 	}
-
-	template <typename... Args> void printError(Args &&... a) {
-		const size_t ERROR_VERBOSITY_LVL = 1;
-		printLn_stderr(ERROR_VERBOSITY_LVL, GAGA_COLOR_RED, "[ERROR] ", GAGA_COLOR_NORMAL,
-		               std::forward<Args>(a)...);
-	}
-
-	template <typename... Args> void printWarning(Args &&... a) {
-		const size_t WARNING_VERBOSITY_LVL = 2;
-		printLn(WARNING_VERBOSITY_LVL, GAGA_COLOR_YELLOW, "[WARNING] ", GAGA_COLOR_NORMAL,
-		        std::forward<Args>(a)...);
-	}
-
-	template <typename... Args> void printDbg(Args &&... a) {
-		const size_t DEBUG_VERBOSITY_LVL = 2;
-		printLn_stderr(DEBUG_VERBOSITY_LVL, GAGA_COLOR_BLUE, "[DBG] ", GAGA_COLOR_NORMAL,
-		               std::forward<Args>(a)...);
-	}
-
-	template <typename... Args> void printLn_stderr(size_t lvl, Args &&... a) {
-		if (verbosity >= lvl) {
-			std::ostringstream output;
-			subPrint(output, std::forward<Args>(a)...);
-			std::cerr << output.str();
-		}
-	}
-
-	template <typename... Args> void printLn(size_t lvl, Args &&... a) {
-		if (verbosity >= lvl) {
-			std::ostringstream output;
-			subPrint(output, std::forward<Args>(a)...);
-			std::cout << output.str();
-		}
-	}
-	template <typename T, typename... Args>
-	void subPrint(std::ostringstream &output, const T &t, Args &&... a) {
-		output << t;
-		subPrint(output, std::forward<Args>(a)...);
-	}
-	void subPrint(std::ostringstream &output) { output << std::endl; }
-
 	void defaultEvaluate() {  // uses evaluator
 		if (!evaluator) throw std::invalid_argument("No evaluator specified");
-		std::vector<std::future<void>> futures;
-		futures.reserve(population.size());
 		for (size_t i = 0; i < population.size(); ++i) {
-			futures.push_back(tp.push([&, i]() {
+			tp.push_work([&, i](size_t procId) {
 				if (evaluateAllIndividuals || !population[i].evaluated) {
 					printLn(3, "Going to evaluate ind ");
 					auto t0 = high_resolution_clock::now();
 					defaultReset(population[i].dna);
-					evaluator(population[i], 0);
+					evaluator(population[i], procId);
 					auto t1 = high_resolution_clock::now();
 					population[i].evaluated = true;
 					double indTime = std::chrono::duration<double>(t1 - t0).count();
@@ -544,15 +496,15 @@ template <typename DNA, typename Ind = Individual<DNA>> class GA {
 					population[i].evalTime = 0.0;
 					population[i].wasAlreadyEvaluated = true;
 				}
-				if (verbosity >= 2) printIndividualStats(population[i]);
-			}));
+				if (verbosity >= 2) printIndividualStats(population[i], procId);
+			});
 		}
-		for (auto &f : futures) f.get();
+		tp.waitAll();
 	}
 
 	// "Vroum vroum"
 	void step(int nbGeneration = 1) {
-		if (currentGeneration == 0 && procId == 0) {
+		if (currentGeneration == 0) {
 			createFolder(folder);
 			if (verbosity >= 1) printStart();
 		}
@@ -560,35 +512,31 @@ template <typename DNA, typename Ind = Individual<DNA>> class GA {
 			newGenerationFunction();
 			auto tg0 = high_resolution_clock::now();
 			nextGeneration();
-			if (procId == 0) {  // stats
-				assert(previousGenerations.back().size());
-				if (population.size() != popSize)
-					throw std::invalid_argument("Population doesn't match the popSize param");
-				auto tg1 = high_resolution_clock::now();
-				double totalTime = std::chrono::duration<double>(tg1 - tg0).count();
-				auto tnp0 = high_resolution_clock::now();
-				if (savePopInterval > 0 && currentGeneration % savePopInterval == 0) {
-					if (savePopEnabled) savePop();
-					for (auto &f : savePop_hooks) f(*this);
-				}
-				if (saveGenInterval > 0 && currentGeneration % saveGenInterval == 0) {
-					if (doSaveParetoFront) {
-						saveParetoFront();
-					} else {
-						saveBests(nbSavedElites);
-						if (nbSavedElites > 0) saveBests(nbSavedElites);
-					}
-				}
-				updateStats(totalTime);
-				if (verbosity >= 1) printGenStats(currentGeneration);
-				if (doSaveGenStats) saveGenStats();
-				if (doSaveIndStats) saveIndStats();
-				auto tnp1 = high_resolution_clock::now();
-				double tnp = std::chrono::duration<double>(tnp1 - tnp0).count();
-				if (verbosity >= 2) {
-					std::cout << "Time for save + next pop = " << tnp << " s." << std::endl;
+			assert(previousGenerations.back().size());
+			if (population.size() != popSize)
+				throw std::invalid_argument("Population doesn't match the popSize param");
+			auto tg1 = high_resolution_clock::now();
+			double totalTime = std::chrono::duration<double>(tg1 - tg0).count();
+			auto tnp0 = high_resolution_clock::now();
+			if (savePopInterval > 0 && currentGeneration % savePopInterval == 0) {
+				if (savePopEnabled) savePop();
+				for (auto &f : savePop_hooks) f(*this);
+			}
+			if (saveGenInterval > 0 && currentGeneration % saveGenInterval == 0) {
+				if (doSaveParetoFront) {
+					saveParetoFront();
+				} else {
+					saveBests(nbSavedElites);
+					if (nbSavedElites > 0) saveBests(nbSavedElites);
 				}
 			}
+			updateStats(totalTime);
+			if (verbosity >= 1) printGenStats(currentGeneration);
+			if (doSaveGenStats) saveGenStats();
+			if (doSaveIndStats) saveIndStats();
+			auto tnp1 = high_resolution_clock::now();
+			double tnp = std::chrono::duration<double>(tnp1 - tnp0).count();
+			printInfos("Time for save operations = ", tnp, "s");
 			++currentGeneration;
 		}
 	}
@@ -667,25 +615,24 @@ template <typename DNA, typename Ind = Individual<DNA>> class GA {
 		nextGen.reserve(nCross + nMut);
 		std::mutex nextGenMutex;
 
-		std::vector<std::future<void>> futures;
 		for (size_t i = s; i < nCross + s; ++i) {
-			futures.push_back(tp.push([&]() {
+			tp.push_work([&](size_t) {
 				auto offspring = crossoverIndividual(*selection(popu, objectives),
 				                                     *selection(popu, objectives));
 				std::lock_guard<std::mutex> thread_lock(nextGenMutex);
 				nextGen.push_back(offspring);
-			}));
+			});
 		}
 
 		for (size_t i = nCross + s; i < nMut + nCross + s; ++i) {
-			futures.push_back(tp.push([&]() {
+			tp.push_work([&](size_t) {
 				auto ind = mutatedIndividual(*selection(popu, objectives));
 				std::lock_guard<std::mutex> thread_lock(nextGenMutex);
 				nextGen.push_back(ind);
-			}));
+			});
 		}
 
-		for (auto &f : futures) f.get();
+		tp.waitAll();
 
 		while (nextGen.size() < n) {
 			auto i = *selection(popu, objectives);
@@ -876,7 +823,56 @@ template <typename DNA, typename Ind = Individual<DNA>> class GA {
 	/*********************************************************************************
 	 *                           STATS, LOGS & PRINTING
 	 ********************************************************************************/
-	void printStart() {
+
+	template <typename... Args> void printError(Args &&... a) const {
+		const size_t ERROR_VERBOSITY_LVL = 1;
+		printLn_stderr(ERROR_VERBOSITY_LVL, GAGA_COLOR_RED, "[ERROR] ", GAGA_COLOR_NORMAL,
+		               std::forward<Args>(a)...);
+	}
+
+	template <typename... Args> void printWarning(Args &&... a) const {
+		const size_t WARNING_VERBOSITY_LVL = 2;
+		printLn(WARNING_VERBOSITY_LVL, GAGA_COLOR_YELLOW, "[WARNING] ", GAGA_COLOR_NORMAL,
+		        std::forward<Args>(a)...);
+	}
+
+	template <typename... Args> void printInfos(Args &&... a) const {
+		const size_t WARNING_VERBOSITY_LVL = 2;
+		printLn(WARNING_VERBOSITY_LVL, GAGA_COLOR_GREYBOLD, "[INFO] ", GAGA_COLOR_NORMAL,
+		        std::forward<Args>(a)...);
+	}
+
+
+
+	template <typename... Args> void printDbg(Args &&... a) const {
+		const size_t DEBUG_VERBOSITY_LVL = 3;
+		printLn_stderr(DEBUG_VERBOSITY_LVL, GAGA_COLOR_BLUE, "[DBG] ", GAGA_COLOR_NORMAL,
+		               std::forward<Args>(a)...);
+	}
+
+	template <typename... Args> void printLn_stderr(size_t lvl, Args &&... a) const {
+		if (verbosity >= lvl) {
+			std::ostringstream output;
+			subPrint(output, std::forward<Args>(a)...);
+			std::cerr << output.str();
+		}
+	}
+
+	template <typename... Args> void printLn(size_t lvl, Args &&... a) const {
+		if (verbosity >= lvl) {
+			std::ostringstream output;
+			subPrint(output, std::forward<Args>(a)...);
+			std::cout << output.str();
+		}
+	}
+	template <typename T, typename... Args>
+	void subPrint(std::ostringstream &output, const T &t, Args &&... a) const {
+		output << t;
+		subPrint(output, std::forward<Args>(a)...);
+	}
+	void subPrint(std::ostringstream &output) const { output << std::endl; }
+
+	void printStart() const {
 		int nbCol = 55;
 		std::cout << std::endl << GAGA_COLOR_GREY;
 		for (int i = 0; i < nbCol - 1; ++i) std::cout << "━";
@@ -975,7 +971,7 @@ template <typename DNA, typename Ind = Individual<DNA>> class GA {
 		genStats.push_back(currentGenStats);
 	}
 
-	string selectMethodToString(const SelectionMethod &sm) {
+	string selectMethodToString(const SelectionMethod &sm) const {
 		switch (sm) {
 			case SelectionMethod::paretoTournament:
 				return "pareto tournament";
@@ -1008,13 +1004,13 @@ template <typename DNA, typename Ind = Individual<DNA>> class GA {
 		if (globalStats.at("genTotalTime") > 0)
 			timeRatio = globalStats.at("indTotalTime") / globalStats.at("genTotalTime");
 		output = std::ostringstream();
-		output << "🕝  max: " << GAGA_COLOR_BLUE << globalStats.at("maxTime")
+		output << "t max: " << GAGA_COLOR_BLUEBOLD << globalStats.at("maxTime")
 		       << GAGA_COLOR_NORMAL << "s";
-		output << ", 🕝  sum: " << GAGA_COLOR_BLUEBOLD << globalStats.at("indTotalTime")
-		       << GAGA_COLOR_NORMAL << "s (x" << timeRatio << " ratio)";
+		output << ", t sum: " << GAGA_COLOR_BLUEBOLD << globalStats.at("indTotalTime")
+		       << GAGA_COLOR_NORMAL << "s (x" << timeRatio << " speedup)";
 		std::cout << tableCenteredText(
 		    l, output.str(),
-		    GAGA_COLOR_CYANBOLD GAGA_COLOR_NORMAL GAGA_COLOR_BLUE GAGA_COLOR_NORMAL "      ");
+		    GAGA_COLOR_CYANBOLD GAGA_COLOR_NORMAL GAGA_COLOR_BLUE GAGA_COLOR_NORMAL "  ");
 		std::cout << tableSeparation(l);
 		for (const auto &o : genStats[n]) {
 			if (o.first != "global" && o.first != "custom") {
@@ -1047,17 +1043,19 @@ template <typename DNA, typename Ind = Individual<DNA>> class GA {
 		std::cout << tableFooter(l);
 	}
 
-	void printIndividualStats(const Ind_t &ind) {
+	void printIndividualStats(const Ind_t &ind, int procId = -1) {
 		std::ostringstream output;
-		output << GAGA_COLOR_GREYBOLD << "[" << GAGA_COLOR_YELLOW << procId
-		       << GAGA_COLOR_GREYBOLD << "]-▶ " << GAGA_COLOR_NORMAL;
+		if (procId >= 0) output << GAGA_COLOR_GREYBOLD << "[thread " << procId << "] ";
+		output << GAGA_COLOR_GREYBOLD << "[gen " << ind.id.first << GAGA_COLOR_YELLOW
+		       << " | ind " << std::setw(4) << ind.id.second << GAGA_COLOR_GREYBOLD << "] --"
+		       << GAGA_COLOR_NORMAL;
 		for (const auto &o : ind.fitnesses)
-			output << " " << o.first << ": " << GAGA_COLOR_BLUEBOLD << std::setw(12) << o.second
-			       << GAGA_COLOR_NORMAL << GAGA_COLOR_GREYBOLD << " |" << GAGA_COLOR_NORMAL;
-		output << " 🕝 : " << GAGA_COLOR_BLUE << ind.evalTime << "s" << GAGA_COLOR_NORMAL;
+			output << " " << o.first << ": " << GAGA_COLOR_BLUEBOLD << std::setw(10) << o.second
+			       << GAGA_COLOR_GREYBOLD << "  | " << GAGA_COLOR_NORMAL;
+		output << GAGA_COLOR_BLUE << "in " << ind.evalTime << "s" << GAGA_COLOR_NORMAL;
 		for (const auto &o : ind.stats) output << " ; " << o.first << ": " << o.second;
 		if (ind.wasAlreadyEvaluated)
-			output << GAGA_COLOR_GREYBOLD << " | (already evaluated)\n" << GAGA_COLOR_NORMAL;
+			output << GAGA_COLOR_GREYBOLD << " (was already evaluated)\n" << GAGA_COLOR_NORMAL;
 		else
 			output << "\n";
 		if (verbosity >= 3) output << ind.infos << std::endl;

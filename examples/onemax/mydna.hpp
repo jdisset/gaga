@@ -7,7 +7,7 @@ struct MyDNA {
 	// and a simple uniform crossover
 	// Through initialization & mutation, we ensure that the dna will only contain 0 or 1
 
-	static const constexpr size_t N = 40;
+	static const constexpr size_t N = 100;
 	std::array<int, N> numbers;
 
 	MyDNA() {}

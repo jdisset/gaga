@@ -182,6 +182,7 @@ template <typename GA> struct SQLiteSaver {
 	}
 
 	void newGen(const GA &ga) {
+		auto t0 = std::chrono::high_resolution_clock::now();
 		assert(currentRunId >= 0);
 
 		insertNewGeneration(ga);
@@ -229,6 +230,9 @@ template <typename GA> struct SQLiteSaver {
 		}
 		assert(gagaToSQLiteIds.back().size() == ga.previousGenerations.back().size());
 		for (auto &f : newGenExtras) f(*this, ga);
+		auto t1 = std::chrono::high_resolution_clock::now();
+		double t = std::chrono::duration<double>(t1 - t0).count();
+		ga.printInfos("Time for SQLite newGen operations = ", t, "s");
 	}
 
 	size_t getIndId(std::pair<size_t, size_t> id) {

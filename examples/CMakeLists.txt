@@ -12,7 +12,7 @@ find_package(Threads)
 add_executable(onemax onemax/simple_onemax.cpp)
 add_executable(onenovelty onemax/simple_novelty.cpp)
 
-target_compile_definitions(onemax PRIVATE SQLITE_SAVE)
+#target_compile_definitions(onemax PRIVATE SQLITE_SAVE)
 target_link_libraries (onemax PRIVATE ${SQLITE3_LIBRARIES} ${CMAKE_THREAD_LIBS_INIT})
 target_include_directories(onemax PRIVATE ${SQLITE3_INCLUDE_DIRS})
 

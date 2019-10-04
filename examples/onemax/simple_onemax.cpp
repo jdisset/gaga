@@ -31,7 +31,7 @@ int main(int, char**) {
 	ga.setPopSize(200);
 	ga.setMutationRate(0.8);
 	ga.setCrossoverRate(0.2);
-	ga.setVerbosity(1);
+	ga.setVerbosity(2);
 	ga.setNbThreads(8);
 
 	// we initialize the population with random DNA. The function passed to
