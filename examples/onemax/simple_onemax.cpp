@@ -1,9 +1,13 @@
 #include <cassert>
 #include <random>
 #include <sstream>
-#include "../../../gaga/extra/sqlitesave/sqlitesave.hpp"
 #include "../../../gaga/gaga.hpp"
 #include "mydna.hpp"
+
+#ifdef SQLITE_SAVE
+#include "../../../gaga/extra/sqlitesave/sqlitesave.hpp"
+#endif
+
 
 int main(int, char**) {
 	globalRand = std::default_random_engine(0);
