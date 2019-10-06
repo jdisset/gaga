@@ -1,6 +1,12 @@
+#pragma once
+#include <cassert>
+#include <chrono>
+#include <condition_variable>
 #include <functional>
 #include <future>
+#include <iostream>
 #include <queue>
+#include <shared_mutex>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -10,7 +16,7 @@
 
 namespace TinyPool {
 using lock_t = std::unique_lock<std::mutex>;
-
+using namespace std::chrono_literals;
 struct notifQueue {
 	std::deque<std::function<void(size_t)>> q;
 	std::mutex mut;
@@ -70,8 +76,10 @@ struct ThreadPool {
 	std::vector<notifQueue> queues;
 	std::atomic<size_t> index{0};
 	std::atomic<size_t> runningTasks{0};
+	std::atomic<bool> shouldJoin{true}, waiterAvailable{false};
 	std::condition_variable zeroTasks;
 	std::mutex mut;
+	std::unique_ptr<std::thread> waiter{nullptr};
 
 	void loop(size_t i) {
 		while (true) {
@@ -81,7 +89,9 @@ struct ThreadPool {
 			}
 			if (!f && !queues[i].pop(f)) break;
 			f(i);
-			if (--runningTasks == 0) zeroTasks.notify_one();
+			std::lock_guard<std::mutex> lck(mut);
+			--runningTasks;
+			zeroTasks.notify_all();
 		}
 	}
 
@@ -90,7 +100,7 @@ struct ThreadPool {
 		while (runningTasks > 0) zeroTasks.wait(lock);
 	}
 
-	ThreadPool(size_t n) { reset(n); }
+	ThreadPool(size_t n = 1) { reset(n); }
 
 	void reset(size_t n) {
 		for (auto& q : queues) q.done();
@@ -105,6 +115,27 @@ struct ThreadPool {
 	~ThreadPool() {
 		for (auto& q : queues) q.done();
 		for (auto& t : threads) t.join();
+	}
+
+	template <typename F>
+	void autoChunksId_work(size_t l, size_t u, const F& f,
+	                       double targetNbChunksPerThread = 2.0) {
+		const size_t MIN_CHUNK_SIZE = 1;
+		assert(l <= u);
+		size_t vsize = u - l;
+		double inc = static_cast<double>(vsize) /
+		             (static_cast<double>(nThreads) * targetNbChunksPerThread);
+		double acc = 0.0;
+		size_t lbound = 0, ubound;
+		do {
+			ubound = std::min(
+			    vsize, std::max(lbound + MIN_CHUNK_SIZE, static_cast<size_t>(acc + inc)));
+			push_work([lbound, ubound, &f](size_t threadId) {
+				for (size_t i = lbound; i < ubound; ++i) f(i, threadId);
+			});
+			lbound = ubound;
+			acc += inc;
+		} while (ubound < vsize);
 	}
 
 	template <typename F> void push_work(F&& f) {

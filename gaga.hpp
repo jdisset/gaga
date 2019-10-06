@@ -479,31 +479,35 @@ template <typename DNA, typename Ind = Individual<DNA>> class GA {
 		setPopulationId(population, currentGeneration);
 	}
 	void defaultEvaluate() {  // uses evaluator
+		// on avg, each thread will receive pop/NBATCH_PER_THREAD evaluations
+		const double NBATCH_PER_THREAD = 4;
 		if (!evaluator) throw std::invalid_argument("No evaluator specified");
-		for (size_t i = 0; i < population.size(); ++i) {
-			tp.push_work([&, i](size_t procId) {
-				if (evaluateAllIndividuals || !population[i].evaluated) {
-					printLn(3, "Going to evaluate ind ");
-					auto t0 = high_resolution_clock::now();
-					defaultReset(population[i].dna);
-					evaluator(population[i], procId);
-					auto t1 = high_resolution_clock::now();
-					population[i].evaluated = true;
-					double indTime = std::chrono::duration<double>(t1 - t0).count();
-					population[i].evalTime = indTime;
-					population[i].wasAlreadyEvaluated = false;
-				} else {
-					population[i].evalTime = 0.0;
-					population[i].wasAlreadyEvaluated = true;
-				}
-				if (verbosity >= 2) printIndividualStats(population[i], procId);
-			});
-		}
+		tp.autoChunksId_work(
+		    0, population.size(),
+		    [&](size_t i, size_t procId) {
+			    if (evaluateAllIndividuals || !population[i].evaluated) {
+				    printLn(3, "Going to evaluate ind ");
+				    auto t0 = high_resolution_clock::now();
+				    defaultReset(population[i].dna);
+				    evaluator(population[i], procId);
+				    auto t1 = high_resolution_clock::now();
+				    population[i].evaluated = true;
+				    double indTime = std::chrono::duration<double>(t1 - t0).count();
+				    population[i].evalTime = indTime;
+				    population[i].wasAlreadyEvaluated = false;
+			    } else {
+				    population[i].evalTime = 0.0;
+				    population[i].wasAlreadyEvaluated = true;
+			    }
+			    if (verbosity >= 2) printIndividualStats(population[i], procId);
+		    },
+		    NBATCH_PER_THREAD);
 		tp.waitAll();
 	}
 
 	// "Vroum vroum"
 	void step(int nbGeneration = 1) {
+		tp.reset(nbThreads);
 		if (currentGeneration == 0) {
 			createFolder(folder);
 			if (verbosity >= 1) printStart();
@@ -526,7 +530,6 @@ template <typename DNA, typename Ind = Individual<DNA>> class GA {
 				if (doSaveParetoFront) {
 					saveParetoFront();
 				} else {
-					saveBests(nbSavedElites);
 					if (nbSavedElites > 0) saveBests(nbSavedElites);
 				}
 			}
@@ -612,29 +615,33 @@ template <typename DNA, typename Ind = Individual<DNA>> class GA {
 
 		size_t nCross = crossoverRate * (n - s);
 		size_t nMut = mutationRate * (n - s);
-		nextGen.reserve(nCross + nMut);
-		std::mutex nextGenMutex;
+
+		std::vector<std::vector<Ind_t>> nextGen_perThread;  // to avoid mutexes
+		nextGen_perThread.resize(nbThreads);
+
+		for (auto &ng : nextGen_perThread) ng.reserve(1.5 * (nCross + nMut) / nbThreads);
 
 		for (size_t i = s; i < nCross + s; ++i) {
-			tp.push_work([&](size_t) {
-				auto offspring = crossoverIndividual(*selection(popu, objectives),
-				                                     *selection(popu, objectives));
-				std::lock_guard<std::mutex> thread_lock(nextGenMutex);
-				nextGen.push_back(offspring);
+			tp.push_work([&](size_t threadId) {
+				nextGen_perThread[threadId].emplace_back(crossoverIndividual(
+				    *selection(popu, objectives), *selection(popu, objectives)));
 			});
 		}
 
 		for (size_t i = nCross + s; i < nMut + nCross + s; ++i) {
-			tp.push_work([&](size_t) {
-				auto ind = mutatedIndividual(*selection(popu, objectives));
-				std::lock_guard<std::mutex> thread_lock(nextGenMutex);
-				nextGen.push_back(ind);
+			tp.push_work([&](size_t threadId) {
+				nextGen_perThread[threadId].emplace_back(
+				    mutatedIndividual(*selection(popu, objectives)));
 			});
 		}
-
 		tp.waitAll();
 
-		while (nextGen.size() < n) {
+		for (auto &ng : nextGen_perThread) {
+			nextGen.insert(nextGen.end(), std::make_move_iterator(ng.begin()),
+			               std::make_move_iterator(ng.end()));
+		}
+
+		while (nextGen.size() < n) {  // filling up the rest with copy
 			auto i = *selection(popu, objectives);
 			i.parents.clear();
 			i.parents.push_back(i.id);
@@ -841,8 +848,6 @@ template <typename DNA, typename Ind = Individual<DNA>> class GA {
 		printLn(WARNING_VERBOSITY_LVL, GAGA_COLOR_GREYBOLD, "[INFO] ", GAGA_COLOR_NORMAL,
 		        std::forward<Args>(a)...);
 	}
-
-
 
 	template <typename... Args> void printDbg(Args &&... a) const {
 		const size_t DEBUG_VERBOSITY_LVL = 3;
