@@ -1,4 +1,6 @@
-#pragma once
+#ifndef TINYPOOL_HPP
+#define TINYPOOL_HPP
+
 #include <cassert>
 #include <chrono>
 #include <condition_variable>
@@ -150,3 +152,4 @@ struct ThreadPool {
 	}
 };
 }  // namespace TinyPool
+#endif
