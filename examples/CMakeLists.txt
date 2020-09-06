@@ -7,6 +7,16 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -g -Wall -Wextra -pedantic")
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/bin)
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
+if( NOT CMAKE_BUILD_TYPE )
+	set(CMAKE_BUILD_TYPE Release) # default build = release
+endif()
+
+set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -Wall -g -Wextra -pedantic")
+
+# Sanitize mode
+set(CMAKE_CXX_FLAGS_SAN " -O1 -g -fsanitize=address,undefined" CACHE STRING "Enable sanitization" FORCE)
+mark_as_advanced( CMAKE_CXX_FLAGS_SAN)
+
 find_package(SQLite3)
 find_package(Threads)
 add_executable(onemax onemax/simple_onemax.cpp)
