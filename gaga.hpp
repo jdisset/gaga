@@ -590,16 +590,14 @@ template <typename DNA, typename Ind = Individual<DNA>> class GA {
 	    const std::unordered_set<std::string> objectives) {
 		assert(popu.size() >= nElites);
 		assert(objectives.size() > 0);
-		if (verbosity >= 3)
-			cerr << "Going to produce " << n << " offsprings out of " << popu.size()
-			     << " individuals" << endl;
+		printDbg("Going to produce ", n, " offsprings out of ", popu.size(), " individuals");
 		std::uniform_real_distribution<double> d(0.0, 1.0);
 		std::vector<Ind_t> nextGen;
 		nextGen.reserve(n);
 		// Elites are placed at the begining
 		if (nElites > 0) {
 			auto elites = getElites(nElites, popu);
-			if (verbosity >= 3) cerr << "elites.size = " << elites.size() << endl;
+			printDbg("retrieved ", elites.size(), " elites");
 			for (auto &e : elites)
 				for (auto i : e.second) {
 					i.parents.clear();
@@ -621,6 +619,7 @@ template <typename DNA, typename Ind = Individual<DNA>> class GA {
 
 		for (auto &ng : nextGen_perThread) ng.reserve(1.5 * (nCross + nMut) / nbThreads);
 
+		printDbg("Going to proceed to ", nCross, " crossovers");
 		for (size_t i = s; i < nCross + s; ++i) {
 			tp.push_work([&](size_t threadId) {
 				nextGen_perThread[threadId].emplace_back(crossoverIndividual(
@@ -628,6 +627,7 @@ template <typename DNA, typename Ind = Individual<DNA>> class GA {
 			});
 		}
 
+		printDbg("Going to proceed to ", nMut, " mutations");
 		for (size_t i = nCross + s; i < nMut + nCross + s; ++i) {
 			tp.push_work([&](size_t threadId) {
 				nextGen_perThread[threadId].emplace_back(
@@ -647,8 +647,10 @@ template <typename DNA, typename Ind = Individual<DNA>> class GA {
 			i.parents.push_back(i.id);
 			i.inheritanceType = "copy";
 			nextGen.push_back(i);
+			printDbg("Filling pop with an extra individual copy");
 		}
 
+		printDbg("nextGen.size(): ",nextGen.size());
 		assert(nextGen.size() == n);
 		return nextGen;
 	}

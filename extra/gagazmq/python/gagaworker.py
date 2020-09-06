@@ -26,7 +26,7 @@ class GAGAWorker:
         if self.compression:
             return msgpack.packb(msg)
         else:
-            return bytes(json.dumps(msg)).encode('utf-8')
+            return bytes(json.dumps(msg), encoding='utf-8')
 
     def decodeMsg(self, msg):
         if self.compression:
