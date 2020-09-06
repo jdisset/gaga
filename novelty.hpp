@@ -1,6 +1,7 @@
 #pragma once
 #include <chrono>
 #include <vector>
+
 #include "gaga.hpp"
 
 namespace GAGA {
@@ -50,7 +51,15 @@ template <typename GA> struct NoveltyExtension {
 	}
 
 	std::function<double(const sig_t &, const sig_t &)> computeSignatureDistance =
-	    [](const auto &, const auto &) { return 0; };
+	    [](const auto &, const auto &) {
+		    std::cerr << "[GAGA WARNING]: computeSignatureDistance not defined. Returning "
+		                 "distance = 0. "
+		                 "Set the signatureDistance method with "
+		                 "NoveltyExtension::setComputeSignatureDistanceFunction or redefine "
+		                 "the distane matrix computation with setComputDistanceMatrixFunction"
+		              << std::endl;
+		    return 0;
+	    };
 
 	std::function<distanceMatrix_t(const std::vector<Ind_t> &)> computeDistanceMatrix =
 	    [&](const auto &ar) { return defaultComputeDistanceMatrix(ar); };
@@ -164,23 +173,27 @@ template <typename GA> struct NoveltyExtension {
 		saver.addExtraTableInstructions(onNewRun, onNewGen);
 	}
 
-	// CORE ALGO
 	/*********************************************************************************
 	 *                          NOVELTY RELATED METHODS
 	 ********************************************************************************/
-	// Novelty works with signatures. A signature is just a std::vector of std::vector of
-	// doubles. It is recommended that those doubles are within a same order of magnitude.
-	// Each std::vector<double> is a "snapshot": it represents the state of the evaluation
-	// of one individual at a certain time. Thus, a complete signature is a combination of
-	// one or more snapshot taken at different points in the simulation (a
+	// Novelty works with signatures. A signature can be anything, and is declared in the
+	// individual type. There also needs to be a distance function defined (c.f
+	// setComputDistanceMatrixFunction and setComputeSignatureDistanceFunction).
+	// -- Default signature:
+	// By default, a signature is just a std::vector of std::vector of doubles.
+	// It is recommended that those doubles are within a same order of magnitude.
+	// Each std::vector<double> could be  a "snapshot": it represents the state of the
+	// evaluation of one individual at a certain time. Thus, a complete signature is a
+	// combination of one or more snapshot taken at different points in the simulation (a
 	// std::vector<vector<double>>). Snapshot must be of same size accross individuals.
+	// --
 	// Signature must be set in the evaluator (see examples)
 	// Options for novelty:
 	//  - Local Competition:
 	//
 
 	distanceMatrix_t defaultComputeDistanceMatrix(const std::vector<Ind_t> &ar) {
-		// this computes both dist(i,j) and dist(j,i), so they can be different.
+		// this computes both dist(i,j) and dist(j,i), assuming they can be different.
 		distanceMatrix_t dmat(ar.size(), std::vector<double>(ar.size()));
 		for (size_t i = 0; i < ar.size(); ++i) {
 			for (size_t j = 0; j < ar.size(); ++j) {
@@ -197,6 +210,7 @@ template <typename GA> struct NoveltyExtension {
 	std::vector<size_t> findKNN(size_t i, size_t knnsize, const distanceMatrix_t &dmat,
 	                            size_t truncateTo) {
 		// returns the K nearest neighbors of i, according to the distance matrix dmat
+		// i excluded
 		if (dmat.size() == 0) return std::vector<size_t>();
 		assert(dmat[i].size() == dmat.size());
 		assert(i < dmat.size());
@@ -220,12 +234,14 @@ template <typename GA> struct NoveltyExtension {
 	std::vector<Ind_t> prevArchive;
 	distanceMatrix_t distanceMatrix;
 
+	// updateNovelty is called to compute the novelty of all the individuals in a given
+	// population, using both this population and the current archive.
 	void updateNovelty(std::vector<Ind_t> &population, GA &ga) {
 		// we append the current population to the archive
 		auto savedArchiveSize = archive.size();
 		for (auto &ind : population) archive.push_back(ind);
 
-		// we compute the distance matrix.
+		// we compute the distance matrix of the whole archive (with new population appended)
 		auto t0 = std::chrono::high_resolution_clock::now();
 		distanceMatrix = computeDistanceMatrix(archive);
 		auto t1 = std::chrono::high_resolution_clock::now();
@@ -265,14 +281,15 @@ template <typename GA> struct NoveltyExtension {
 		// Archive maintenance: first we erase the entire pop that we had appended
 		archive.erase(archive.begin() + static_cast<long>(savedArchiveSize), archive.end());
 
-		maintainArchiveSize(population, nbOfArchiveAdditionsPerGeneration);
+		maintainArchiveSize_constantReplacement(population, nbOfArchiveAdditionsPerGeneration);
+
 		prevArchive = archive;
 
 		ga.printLn(2, "Distance matrix computation took ", distanceMatrixTime, "s");
 		ga.printLn(2, "New archive size = ", archive.size());
 	}
 
-	void maintainArchiveSize(const std::vector<Ind_t> &population, size_t nAdditions) {
+	void maintainArchiveSize_constantReplacement(const std::vector<Ind_t> &population, size_t nAdditions) {
 		auto computeNovelty = [&](size_t id) {
 			std::vector<size_t> knn = findKNN(id, K, distanceMatrix, archive.size());
 			double sum = 0;
@@ -280,7 +297,9 @@ template <typename GA> struct NoveltyExtension {
 			return sum / (double)knn.size();
 		};
 
-		// number of ind to replace in archive
+		// number of ind to replace in archive. There is always nAdditions operations: if the
+		// archive is full all operations are replacement; if it isn't, we just add random
+		// individuals.
 		int toReplace = std::min(static_cast<int>(nAdditions),
 		                         std::max(0, static_cast<int>(archive.size() + nAdditions) -
 		                                         static_cast<int>(maxArchiveSize)));
@@ -322,7 +341,7 @@ template <typename GA> struct NoveltyExtension {
 		distanceMatrix.resize(archive.size());
 		for (auto &r : distanceMatrix) r.resize(archive.size());
 
-		// adding random ind
+		// If the archive is not full, we just add random ind
 		for (int i = 0; i < toAdd; ++i) {
 			size_t p_i = d(GA::globalRand());  // random ind position in population
 			archive.push_back(population[p_i]);
