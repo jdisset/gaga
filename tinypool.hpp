@@ -118,7 +118,7 @@ struct ThreadPool {
 	}
 
 	template <typename F>
-	void autoChunksId_work(size_t l, size_t u, const F& f,
+	void autoChunksId_work(size_t l, size_t u, F&& f,
 	                       double targetNbChunksPerThread = 2.0) {
 		const size_t MIN_CHUNK_SIZE = 1;
 		assert(l <= u);
@@ -130,8 +130,11 @@ struct ThreadPool {
 		do {
 			ubound = std::min(
 			    vsize, std::max(lbound + MIN_CHUNK_SIZE, static_cast<size_t>(acc + inc)));
-			push_work([lbound, ubound, &f](size_t threadId) {
-				for (size_t i = lbound; i < ubound; ++i) f(i, threadId);
+			// fcapture = perfect capturing of f through a tuple:
+			// allows to use std::move if f is an rvalue, or a reference if it's an lvalue.
+			push_work([lbound, ubound,
+			           fcapture = std::tuple<F>(std::forward<F>(f))](size_t threadId) {
+				for (size_t i = lbound; i < ubound; ++i) std::get<0>(fcapture)(i, threadId);
 			});
 			lbound = ubound;
 			acc += inc;
