@@ -3,61 +3,64 @@
             |  |  |     |  |  |     |
             |_____|__|__|_____|__|__|
 
-Header-only parallel multi-objective genetic algorithm library written in C++14.
+Header-only parallel multi-objective genetic algorithm library written in C++17.
 
 ## Features
- - Extensible & highly customizable
  - Multi-objective 
- - Speciation 
- - Novelty search
- - Native C++ parralelism
- - No external dependencies
- - Meant to be easy to use and easy to install (header-only)
- - Advanced console logging and stats generations
- - Network distributed evaluations (cf. gagatools repository)
+ - No external dependencies, header only
+ - Modular thanks to hooks defined at every important steps. Major features (speciation, novelty search, ...) are added through official extensions, and you can easily create your own.
+ - Sane "invisible" defaults but highly customizable.
+ - Native local C++ thread-based parralelism + Network distributed evaluations with ZeroMQ (clients in other languages are possible!)
+ - Advanced logging and advanced stats (with SQLite support)
 
 ## Installation
-Simply clone this repository, copy the directory in your project (or just the gaga.hpp file and the include folder) and include gaga.hpp in your project. Don't forget to enable c++14 when compiling.
+Simply clone this repository in your project and include gaga.hpp. Enable c++17 when compiling. The examples directory contains some simple CMakeLists.txt.
 
 ## Basic Usage
 ### DNA & Individual
-The main thing you need to provide is a valid DNA class, whose minimal requirements are:
+The main thing you need to provide is a valid DNA class.
+A valid DNA class *MUST* have:
  - a `std::string serialize()` method
  - a constructor taking the output of `serialize()`
- - a `void mutate()` method that mutates your dna
- - a `DNA crossover(const DNA &other)` method that returns an offspring
- - a `void reset()` method that resets your DNA before it can be used in a new evaluation
 
-Internally, GAGA manipulates `Individuals` struct instances, whose raw dna member is accessible through `individual.dna`.
+GAGA deals with `Individuals` instances; the population of the current generation is for example accessible through `GAGA::population`, and is a vector of Individuals (of type `Ind_t`).
+The default Individual type used by GAGA encapsulates your raw DNA type, which you can easily access at anytime through `Ind_t::dna`.
+A custom Individual type can be specified, and some extensions provide their individual type, as they can require different informations to be attached to an individual. For example, the novelty search module requires that each individual also have a signature, and therefore provides the `GAGA::NoveltyIndividual<DNA_t, signature_t>` type.
 
-You can initialize your GAGA instance using your custom DNA:
+To initialize a simple GAGA instance using your custom DNA and the default Individual type:
 ```c++
 GAGA::GA<DNA> ga;
 ```
-Or if you plan on using novelty search with a custom footprint type `footprint_t`:
+
+### Mutation & Crossover
+You need a Crossover and/or a Mutation operator.
+By default, GAGA will try to call 
+`DNA::mutate() // mutates the current DNA` and `DNA::crossover(const DNA& other) // returns an offspring DNA`
+it these methods are defined in your DNA type. 
+You can however manually define the mutation and crossover methods:
 ```c++
-GAGA::GA<DNA, footprint_t> ga;
+	GAGA::setMutateMethod([](DNA& dna){myMutation(dna)});
+	GAGA::setCrossoverMethod([](const DNA& dna1, const DNA& dna2){return myCrossover(dna1, dna2);});
 ```
 
 ### Evaluator
-An evaluator is a lambda function that takes an individual and sets its fitnesses (and footprints when novelty is enabled). It has to be passed to the GAGA instance through the `setEvaluator` method, which takes a reference to an individual and the id of the thread that is being used.
+An evaluator is a function that takes an individual and sets its fitnesses (and other necessary members such as its signature when novelty search is enabled). 
+It's probably the most important function you have to provide. It has to be passed to the GAGA instance through the `setEvaluator` method. 
+An evaluator takes a reference to an individual and the id of the thread that is being used (which you probably don't care about most of the time, but it is sometimes useful for some thread_safe constructs).
+
 ```c++
 ga.setEvaluator([](auto &i, int procId) { 
-	i.fitnesses["obj0"] = i.dna.doYourThing(); 
-	i.fitnesses["obj1"] = i.dna.doYourOtherThing(); 
-	// if novelty search is enabled:
-	i.footprint = i.dna.computeFootprint();;
-	// here we ignore procId but it could be useful for debuging, for example.
+	i.fitnesses["obj0"] = i.dna.doYourThing(); // we set the fitness value for objective "obj0"
+	i.fitnesses["obj1"] = i.dna.doYourOtherThing(); // automatically becomes a multi-objective optimisation
 });
 ```
+
 ### Population initialization
-Once you have set all of the desired options (see below) for your evolutionary run, just initialize your first population using the `initPopulation` method, which takes a lambda returning a DNA.
+Once you have set all of the desired options (see below) for your evolutionary run, just initialize your first population using the `initPopulation` method, which takes a function returning a DNA.
 
 ```c++
 	ga.initPopulation([]() { 
-		DNA dna;
-		dna.randomInit();
-		return dna; 
+		return DNA::randomDNA();
 	});
 ```
 
@@ -66,17 +69,18 @@ You can now run gaga
 	const int nbGenerations = 200;
 	ga.step(nbGenerations);
 ```
-See tests for more examples.
+
+See the examples folder for usage of novely search and SQlite export.
 
 ## Parallelism
-GAGA supports both MPI and native C++ thread based parallelism. For the natice c++ parallelisation (recommended on shared memory architectures), you need to set the number of threads using GAGA::setNbThreads(). Default is 1 thread.
-If you need to use MPI parralelism (when running on a cluster for example), `#define GAGA_MPI_CLUSTER` before including gaga. You then need to link the MPI library of your choice (OpenMPI or IntelMPI for example) when compiling.
+GAGA supports both native C++ thread based parallelism and ZeroMQ network distribution. For the native c++ parallelisation (recommended on shared memory architectures), you need to set the number of threads using `GAGA::setNbThreads()`.
+With ZeroMQ based parallelisation, you can distribute the evaluation of the individuals on a local machine or on several networked machines. The GAGAZMQ extension provides C++ workers that you can run from the same program as the server, in different threads, or as their own independent program, potentially on different machine. A simple python worker is also provided, meaning you can evaluate individuals in python, as long as you are able to parse your own DNA.
+More details and a working example are in tests/gagazmq_tests.hpp 
+
+
 
 ## Advanced customization
-Although GAGA provides sane "basic" defaults, most key algorithmic steps of the Genetic Algorithm can be swapped and augmented. Here is a brief overview of the main blocks:
- - `newGenerationFunction()` is a lambda called at the begining of every `step()`. Default doesn't do anything, so feel free to use it as a hook.
- - `nextGenerationFunction()` is a lambda that acts as a wrapper for the main method, currently either `classic()` or `speciation()`. You can write your own main method.
- - `evaluate()` is a lambda used both by the classic and the speciation main methods. It calls the evaluator on every individuals, evaluating them in parallel using a threadpool. You could replace this if you know what you are doing. That's, for example, what the zero-mq distributed evaluation does. (Cf. gagatools)
+Although GAGA provides sane "basic" defaults, most key algorithmic steps of the Genetic Algorithm can be swapped and augmented. See examples folder.
 
 ## Main options and configuration methods
 ### General
@@ -88,7 +92,6 @@ Although GAGA provides sane "basic" defaults, most key algorithmic steps of the 
  - `setNbElites(unsigned int n)`: for each new generation, the n bests individuals will be preserved. (with multiple objectives, "best" can have different meanings depending on the current selection method) 
  - `setVerbosity(unsigned int)`: sets the verbosity level. 0: silent. 1: generation recaps. 2: 1 + individuals recaps. 3: 2 + various debug infos.
  - `setPopulation(const vector<Individual<DNA>>&)`: manually sets the population. Can be used to initialise the population at the begining of the evolutionnary run (although initPopulation is recommended), recovering from a save or just switching to a new population in the middle of a run.
- - `setNewGenerationFunction(std::function<void(void)>)`: sets a function that will be called before the current population is evaluated. The current population can be accessed through the public attribute GAGA::population, which is just a vector of individuals.
 
 ### Saving individuals and stats
  - `setSaveFolder(std::string)`: where to save the results (populations & stats). Default: "../evos".
@@ -102,23 +105,27 @@ Although GAGA provides sane "basic" defaults, most key algorithmic steps of the 
 
 
 ### Novelty search
-In order for novelty to be used, you need to provide a footprint (vector of vector of doubles) for each individuals (through the evaluator.
- - `enableNovelty()` & `disableNovelty()`: enables/disables novelty
- - `setKNN(unsigned int)`: number of neighbors to consider when computing the novelty of an individual. Default: 15.
- - `enableArchiveSave()` & `disableArchiveSave()`: enables/disables saving of the whole archive after each generation. The archive is filled at each generation with a certain number (nbOfArchiveAdditionsPerGeneration) of new individuals. These individuals are randomly selected (cf. "Devising Effective Novelty Search Algorithms: A Comprehensive Empirical Study")
-
+c.f. examples/onemax/simple_novelty.cpp
 
 ### Speciation
-When speciation is enabled, you have to provide a distance function that will returns the distance between two individuals. It is this distance that will be used to determine if two individuals belong to the same specie. Between each generation, if need be, you can access the list of species and the individuals in them through the public attribute GAGA::specie, which is a two dimensional vector of pointers to individuals. 
- - `setIndDistanceFunction(std::function<double(const Individual &, const Individual &)>)`: sets the distance function.
- - `enableSpeciation()/disableSpeciation()`: enable or disable speciation.
- - `setMinSpeciationThreshold(double)/setMaxSpeciationThreshold(double)`: sets the min and max genotypic distances for two individuals to be considered of the same species. The speciation threshold is indeed dynamic and will fulctuate between these 2 values.
- - `setSpeciationThreshold(double)`: sets the initial speciation threshold value.
- - `setSpeciationThresholdIncrement(double)`: the speed at which the speciation threshold will fluctuate.
- - `setMinSpecieSize(double)`: the minimum specie size.
- 
+With the speciation extension, you have to provide a distance function that will return the distance between two individuals. It is this distance that will be used to determine if two individuals belong to the same specie. Between each generation, if need be, you can access the list of species and the individuals. See speciation.hpp for more details.
+
 ## Logging
-In addition to the verbosity options and the Generation + Individual stats (see above), some precious lineage information is stored in each individual. You can access every individual in the current generation through the `GAGA::population` container.
+In addition to the verbosity options and the Generation + Individual stats, some precious lineage information is stored in each individual. You can access every individual in the current generation through the `GAGA::population` container.
+c.f definition of the default Individual type in gaga.hpp:
+```c++
+template <typename DNA> struct Individual {
+	DNA dna;
+	std::map<std::string, double> fitnesses;  // std::map {"fitnessCriterName" -> "fitnessValue"}
+	double evalTime = 0.0;
+	std::pair<size_t, size_t> id{0u, 0u};  // gen id , ind id
+	std::string infos;  // custom infos, description, whatever... filled by user
+	std::map<string, double> stats;  // custom stats, filled by user
+	std::vector<std::pair<size_t, size_t>> parents;  // vector of {{ generation id, individual id }}
+	std::string inheritanceType = "exnihilo";  // inheritance type : mutation, crossover, copy, exnihilo
+...
+```
+
 It is thus relatively trivial to create, for example, an ancestry tree for your evolutionary runs. 
-In the gagatools repository, a SQLite wrapper will conveniently store all of this information in a neat sql satabase.
+The SQLite extension will conveniently store all of this information in a neat sql satabase. Check examples/onemax/simple_onemax.cpp and examples/onemax/simple_novelty.cpp for more details.
 

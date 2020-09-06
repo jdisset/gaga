@@ -1,4 +1,8 @@
 #include <array>
+#include <random>
+#include <sstream>
+#include <string>
+
 static std::default_random_engine globalRand;
 struct MyDNA {
 	// MyDNA is a simple example of a DNA class

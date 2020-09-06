@@ -106,10 +106,6 @@ TEST_CASE("Novelty") {
 				auto distMat_distributed =
 				    nov.distributedComputeDistanceMatrix(nov.archive, server);
 				auto distMat_nonDistributed = nov.defaultComputeDistanceMatrix(nov.archive);
-		   /*     std::cerr << "distributed = " << nlohmann::json(distMat_distributed).dump()*/
-						  //<< std::endl;
-				//std::cerr << "non distributed = " << nlohmann::json(distMat_nonDistributed).dump()
-						  //<< std::endl;
 
 				REQUIRE(distMat_nonDistributed.size() == nov.archive.size());
 
