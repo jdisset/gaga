@@ -332,7 +332,7 @@ template <typename DNA, typename Ind = Individual<DNA>> class GA {
 
 	static std::mt19937_64 &globalRand() {
 		std::random_device rd;
-		static std::mt19937_64 r(rd());
+		static thread_local std::mt19937_64 r(rd());
 		return r;
 	};
 
@@ -484,7 +484,7 @@ template <typename DNA, typename Ind = Individual<DNA>> class GA {
 		if (!evaluator) throw std::invalid_argument("No evaluator specified");
 		tp.autoChunksId_work(
 		    0, population.size(),
-		    [&](size_t i, size_t procId) {
+		    [this](size_t i, size_t procId) {
 			    if (evaluateAllIndividuals || !population[i].evaluated) {
 				    printLn(3, "Going to evaluate ind ");
 				    auto t0 = high_resolution_clock::now();
