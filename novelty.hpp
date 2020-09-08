@@ -281,7 +281,8 @@ template <typename GA> struct NoveltyExtension {
 		// Archive maintenance: first we erase the entire pop that we had appended
 		archive.erase(archive.begin() + static_cast<long>(savedArchiveSize), archive.end());
 
-		maintainArchiveSize_constantReplacement(population, nbOfArchiveAdditionsPerGeneration);
+		maintainArchiveSize_constantReplacement(population,
+		                                        nbOfArchiveAdditionsPerGeneration);
 
 		prevArchive = archive;
 
@@ -289,7 +290,8 @@ template <typename GA> struct NoveltyExtension {
 		ga.printLn(2, "New archive size = ", archive.size());
 	}
 
-	void maintainArchiveSize_constantReplacement(const std::vector<Ind_t> &population, size_t nAdditions) {
+	void maintainArchiveSize_constantReplacement(const std::vector<Ind_t> &population,
+	                                             size_t nAdditions) {
 		auto computeNovelty = [&](size_t id) {
 			std::vector<size_t> knn = findKNN(id, K, distanceMatrix, archive.size());
 			double sum = 0;
@@ -356,13 +358,14 @@ template <typename GA> struct NoveltyExtension {
 	void saveArchive(const GA &ga) {
 		json o = Ind_t::popToJSON(archive);
 		o["evaluator"] = ga.getEvaluatorName();
-		std::stringstream baseName;
-		baseName << ga.getSaveFolder() << "/gen" << ga.getCurrentGenerationNumber();
-		GA::mkd(baseName.str().c_str());
-		std::stringstream fileName;
-		fileName << baseName.str() << "/archive" << ga.getCurrentGenerationNumber() << ".pop";
+		fs::path basePath =
+		    ga.getSaveFolder() / GAGA::concat("gen", ga.getCurrentGenerationNumber());
+		fs::create_directories(basePath);
+		std::string fileName =
+		    GAGA::concat("archive", ga.getCurrentGenerationNumber(), ".pop");
+		fs::path filePath = basePath / fileName;
 		std::ofstream file;
-		file.open(fileName.str());
+		file.open(filePath);
 		file << o.dump();
 		file.close();
 	}

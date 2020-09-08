@@ -33,6 +33,7 @@
 #include <chrono>
 #include <cstring>
 #include <deque>
+#include <filesystem>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
@@ -47,9 +48,6 @@
 
 #include "third_party/json.hpp"
 #include "tinypool.hpp"
-#ifdef _WIN32
-#include <direct.h>  // required for _mkdir()
-#endif
 
 #ifdef GAGA_COLOR_DISABLED
 #define GAGA_COLOR_PURPLE ""
@@ -93,6 +91,7 @@
 
 namespace GAGA {
 
+namespace fs = std::filesystem;
 using std::cerr;
 using std::cout;
 using std::endl;
@@ -108,6 +107,12 @@ template <typename T, typename U>
 std::ostream &operator<<(std::ostream &out, const std::pair<T, U> &p) {
 	out << "{" << p.first << ", " << p.second << "}";
 	return out;
+}
+
+template <typename... Args> std::string concat(Args &&... parts) {
+	std::stringstream ss;
+	(ss << ... << std::forward<Args>(parts));
+	return ss.str();
 }
 
 /*****************************************************************************
@@ -237,7 +242,7 @@ template <typename DNA, typename Ind = Individual<DNA>> class GA {
 	bool savePopEnabled = true;              // save the whole population
 	unsigned int savePopInterval = 1;        // interval between 2 whole population saves
 	unsigned int saveGenInterval = 1;        // interval between 2 elites/pareto saves
-	string folder = "evos/";                 // where to save the results
+	fs::path folder = "evos/";               // where to save the results
 	string evaluatorName;                    // name of the given evaluator func
 	double crossoverRate = 0.2;              // crossover probability
 	double mutationRate = 0.5;               // mutation probablility
@@ -270,7 +275,7 @@ template <typename DNA, typename Ind = Individual<DNA>> class GA {
 	void setPopSaveInterval(unsigned int n) { savePopInterval = n; }
 	void setGenSaveInterval(unsigned int n) { saveGenInterval = n; }
 	void setSaveFolder(std::string s) { folder = s; }
-	std::string getSaveFolder() const { return folder; }
+	fs::path getSaveFolder() const { return folder; }
 	void setNbThreads(unsigned int n) {
 		if (n == 0) printWarning("Can't use 0 threads! Using 1 instead.");
 		nbThreads = std::max(1u, n);
@@ -928,7 +933,7 @@ template <typename DNA, typename Ind = Individual<DNA>> class GA {
 		          << GAGA_COLOR_NORMAL << std::endl;
 		std::cout << "  - crossover rate = " << GAGA_COLOR_BLUE << crossoverRate
 		          << GAGA_COLOR_NORMAL << std::endl;
-		std::cout << "  - writing results in " << GAGA_COLOR_BLUE << folder
+		std::cout << "  - writing results in " << GAGA_COLOR_BLUE << folder.u8string()
 		          << GAGA_COLOR_NORMAL << std::endl;
 		for (int i = 0; i < nbCol - 1; ++i) std::cout << lineChar;
 		std::cout << std::endl;
@@ -1159,6 +1164,7 @@ template <typename DNA, typename Ind = Individual<DNA>> class GA {
 	/*********************************************************************************
 	 *                         SAVING STUFF
 	 ********************************************************************************/
+
 	void saveBests(size_t n) {
 		if (n > 0) {
 			const std::vector<Ind_t> &p = previousGenerations.back();
@@ -1168,19 +1174,18 @@ template <typename DNA, typename Ind = Individual<DNA>> class GA {
 				objectives.push_back(o.first);  // we need to know objective functions
 			}
 			auto elites = getElites(objectives, n, p);
-			std::stringstream baseName;
-			baseName << folder << "/gen" << currentGeneration;
-			mkd(baseName.str().c_str());
+			fs::path basePath = folder / concat("gen", currentGeneration);
+			fs::create_directories(basePath);
 			if (verbosity >= 3) {
-				cerr << "created directory " << baseName.str() << endl;
+				cerr << "created directory " << basePath.u8string() << endl;
 			}
 			for (auto &e : elites) {
 				int id = 0;
 				for (auto &i : e.second) {
-					std::stringstream fileName;
-					fileName << baseName.str() << "/" << e.first << "_" << i.fitnesses.at(e.first)
-					         << "_" << id++ << ".dna";
-					std::ofstream fs(fileName.str());
+					std::string fileName =
+					    concat(e.first, "__", i.fitnesses.at(e.first), "_", id++, ".dna");
+					fs::path filePath = basePath / fileName;
+					std::ofstream fs(filePath);
 					if (!fs) {
 						cerr << "Cannot open the output file." << endl;
 					}
@@ -1204,23 +1209,22 @@ template <typename DNA, typename Ind = Individual<DNA>> class GA {
 		}
 
 		auto pfront = getParetoFront(pop);
-		std::stringstream baseName;
-		baseName << folder << "/gen" << currentGeneration;
-		mkd(baseName.str().c_str());
+		fs::path basePath = folder / concat("gen", currentGeneration);
+		fs::create_directories(basePath);
 		if (verbosity >= 3) {
-			std::cout << "created directory " << baseName.str() << std::endl;
+			std::cout << "created directory " << basePath.u8string() << std::endl;
 		}
 
 		int id = 0;
 		for (const auto &ind : pfront) {
 			std::stringstream filename;
-			filename << baseName.str() << "/";
 			for (const auto &f : ind->fitnesses) {
 				filename << f.first << f.second << "_";
 			}
 			filename << id++ << ".dna";
+			fs::path filePath = basePath / filename.str();
 
-			std::ofstream fs(filename.str());
+			std::ofstream fs(filePath);
 			if (!fs) {
 				std::cerr << "Cannot open the output file.\n";
 			}
@@ -1231,8 +1235,7 @@ template <typename DNA, typename Ind = Individual<DNA>> class GA {
 
 	void saveGenStats() {
 		std::stringstream csv;
-		std::stringstream fileName;
-		fileName << folder << "/gen_stats.csv";
+		fs::path filePath = folder / "gen_stats.csv";
 		csv << "generation";
 		if (genStats.size() > 0) {
 			for (const auto &cat : genStats[0]) {
@@ -1253,7 +1256,7 @@ template <typename DNA, typename Ind = Individual<DNA>> class GA {
 				csv << endl;
 			}
 		}
-		std::ofstream fs(fileName.str());
+		std::ofstream fs(filePath);
 		if (!fs) cerr << "Cannot open the output file." << endl;
 		fs << csv.str();
 		fs.close();
@@ -1262,8 +1265,7 @@ template <typename DNA, typename Ind = Individual<DNA>> class GA {
 	// gen, idInd, fit0, fit1, time
 	void saveIndStats() {
 		std::stringstream csv;
-		std::stringstream fileName;
-		fileName << folder << "/ind_stats.csv";
+		std::filesystem::path filePath = folder / "ind_stats.csv";
 		static bool indStatsWritten = false;
 		auto &lastGen = previousGenerations.back();
 		if (!indStatsWritten) {
@@ -1281,58 +1283,32 @@ template <typename DNA, typename Ind = Individual<DNA>> class GA {
 			csv << p.evalTime << std::endl;
 		}
 		std::ofstream fs;
-		fs.open(fileName.str(), std::fstream::out | std::fstream::app);
+		fs.open(filePath, std::fstream::out | std::fstream::app);
 		if (!fs) cerr << "Cannot open the output file." << endl;
 		fs << csv.str();
 		fs.close();
 	}
 
  public:
-	int static mkd(const char *p) {
-#ifdef _WIN32
-		return _mkdir(p);
-#else
-		return mkdir(p, 0777);
-#endif
-	}
+	void createFolder(fs::path baseFolder) {
+		// we use the name of the evaluator + day + month
+		// as base name for the evolution directory
+		time_t now = system_clock::to_time_t(system_clock::now());
+		struct tm *parts = localtime(&now);
+		std::string baseName = evaluatorName + "_" + std::to_string(1900 + parts->tm_year) +
+		                       "-" + std::to_string(parts->tm_mon + 1) + "-" +
+		                       std::to_string(parts->tm_mday) + "_";
 
-	void mkPath(char *file_path) {
-		assert(file_path && *file_path);
-		char *p;
-		for (p = strchr(file_path + 1, '/'); p; p = strchr(p + 1, '/')) {
-			*p = '\0';
-			if (mkd(file_path) == -1) {
-				if (errno != EEXIST) {
-					*p = '/';
-					return;
-				}
-			}
-			*p = '/';
-		}
-	}
-
-	void createFolder(string baseFolder) {
-		if (baseFolder.back() != '/') baseFolder += "/";
-		struct stat sb;
-		char bFChar[500];
-		strncpy(bFChar, baseFolder.c_str(), 500 - 1);
-		mkPath(bFChar);
-		auto now = system_clock::now();
-		time_t now_c = system_clock::to_time_t(now);
-		struct tm *parts = localtime(&now_c);
-
-		std::stringstream fname;
-		fname << evaluatorName << "_" << parts->tm_mday << "_" << parts->tm_mon + 1 << "_";
+		// a counter is added at the end of the directory name
+		// and incremented until the name is unique
+		fs::path finalPath;
 		int cpt = 0;
-		std::stringstream ftot;
 		do {
-			ftot.clear();
-			ftot.str("");
-			ftot << baseFolder << fname.str() << cpt;
-			cpt++;
-		} while (stat(ftot.str().c_str(), &sb) == 0);  // && S_ISDIR(sb.st_mode));
-		folder = ftot.str();
-		mkd(folder.c_str());
+			finalPath = baseFolder / (baseName + std::to_string(cpt++));
+		} while (fs::exists(finalPath));
+
+		fs::create_directories(finalPath);
+		folder = finalPath;
 	}
 
 	void loadPop(string file) {
@@ -1357,13 +1333,11 @@ template <typename DNA, typename Ind = Individual<DNA>> class GA {
 		json o = Ind_t::popToJSON(previousGenerations.back());
 		o["evaluator"] = evaluatorName;
 		o["generation"] = currentGeneration;
-		std::stringstream baseName;
-		baseName << folder << "/gen" << currentGeneration;
-		mkd(baseName.str().c_str());
-		std::stringstream fileName;
-		fileName << baseName.str() << "/pop" << currentGeneration << ".pop";
+		fs::path basePath = folder / concat("gen", currentGeneration);
+		fs::create_directories(basePath);
+		fs::path filePath = basePath / ("pop" + std::to_string(currentGeneration) + ".pop");
 		std::ofstream file;
-		file.open(fileName.str());
+		file.open(filePath);
 		file << o.dump();
 		file.close();
 	}
