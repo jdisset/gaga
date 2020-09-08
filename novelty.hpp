@@ -70,7 +70,7 @@ template <typename GA> struct NoveltyExtension {
 		    [this](GA &ga) { updateNovelty(ga.population, ga); });
 
 		gagaInstance.addPrintStartMethod([this](const GA &) {
-			std::cout << "  ▹ novelty is " << GAGA_COLOR_GREEN << "enabled" << GAGA_COLOR_NORMAL
+			std::cout << "  - novelty is " << GAGA_COLOR_GREEN << "enabled" << GAGA_COLOR_NORMAL
 			          << std::endl;
 			std::cout << "    - Nearest Neighbors size = " << GAGA_COLOR_BLUE << K
 			          << GAGA_COLOR_NORMAL << std::endl;

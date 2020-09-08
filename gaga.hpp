@@ -51,6 +51,23 @@
 #include <direct.h>  // required for _mkdir()
 #endif
 
+#ifdef GAGA_COLOR_DISABLED
+#define GAGA_COLOR_PURPLE ""
+#define GAGA_COLOR_PURPLEBOLD ""
+#define GAGA_COLOR_BLUE ""
+#define GAGA_COLOR_BLUEBOLD ""
+#define GAGA_COLOR_GREY ""
+#define GAGA_COLOR_GREYBOLD ""
+#define GAGA_COLOR_YELLOW ""
+#define GAGA_COLOR_YELLOWBOLD ""
+#define GAGA_COLOR_RED ""
+#define GAGA_COLOR_REDBOLD ""
+#define GAGA_COLOR_CYAN ""
+#define GAGA_COLOR_CYANBOLD ""
+#define GAGA_COLOR_GREEN ""
+#define GAGA_COLOR_GREENBOLD ""
+#define GAGA_COLOR_NORMAL ""
+#else
 #define GAGA_COLOR_PURPLE "\033[35m"
 #define GAGA_COLOR_PURPLEBOLD "\033[1;35m"
 #define GAGA_COLOR_BLUE "\033[34m"
@@ -66,6 +83,7 @@
 #define GAGA_COLOR_GREEN "\033[32m"
 #define GAGA_COLOR_GREENBOLD "\033[1;32m"
 #define GAGA_COLOR_NORMAL "\033[0m"
+#endif
 
 #ifdef GAGA_TESTING
 #define GAGA_PROTECTED_TESTABLE public
@@ -650,7 +668,7 @@ template <typename DNA, typename Ind = Individual<DNA>> class GA {
 			printDbg("Filling pop with an extra individual copy");
 		}
 
-		printDbg("nextGen.size(): ",nextGen.size());
+		printDbg("nextGen.size(): ", nextGen.size());
 		assert(nextGen.size() == n);
 		return nextGen;
 	}
@@ -882,34 +900,41 @@ template <typename DNA, typename Ind = Individual<DNA>> class GA {
 	void printStart() const {
 		int nbCol = 55;
 		std::cout << std::endl << GAGA_COLOR_GREY;
-		for (int i = 0; i < nbCol - 1; ++i) std::cout << "━";
+#ifndef GAGA_UTF8_DEBUG_PRINT_DISABLED
+		auto lineChar = "━";
+#else
+		auto lineChar = "━";
+#endif
+		for (int i = 0; i < nbCol - 1; ++i) std::cout << lineChar;
 		std::cout << std::endl;
 		std::cout << GAGA_COLOR_YELLOW << "              ☀     " << GAGA_COLOR_NORMAL
 		          << " Starting GAGA " << GAGA_COLOR_YELLOW << "    ☀ " << GAGA_COLOR_NORMAL;
 		std::cout << std::endl;
+#ifndef GAGA_UTF8_DEBUG_PRINT_DISABLED
 		std::cout << GAGA_COLOR_BLUE << "                      ¯\\_ಠ ᴥ ಠ_/¯" << std::endl
 		          << GAGA_COLOR_GREY;
+#endif
 		for (int i = 0; i < nbCol - 1; ++i) std::cout << "┄";
 		std::cout << std::endl << GAGA_COLOR_NORMAL;
-		std::cout << "  ▹ population size = " << GAGA_COLOR_BLUE << popSize
+		std::cout << "  - population size = " << GAGA_COLOR_BLUE << popSize
 		          << GAGA_COLOR_NORMAL << std::endl;
-		std::cout << "  ▹ nb of elites = " << GAGA_COLOR_BLUE << nbElites << GAGA_COLOR_NORMAL
+		std::cout << "  - nb of elites = " << GAGA_COLOR_BLUE << nbElites << GAGA_COLOR_NORMAL
 		          << std::endl;
-		std::cout << "  ▹ nb of tournament competitors = " << GAGA_COLOR_BLUE
+		std::cout << "  - nb of tournament competitors = " << GAGA_COLOR_BLUE
 		          << tournamentSize << GAGA_COLOR_NORMAL << std::endl;
-		std::cout << "  ▹ selection = " << GAGA_COLOR_BLUE
+		std::cout << "  - selection = " << GAGA_COLOR_BLUE
 		          << selectMethodToString(selecMethod) << GAGA_COLOR_NORMAL << std::endl;
-		std::cout << "  ▹ mutation rate = " << GAGA_COLOR_BLUE << mutationRate
+		std::cout << "  - mutation rate = " << GAGA_COLOR_BLUE << mutationRate
 		          << GAGA_COLOR_NORMAL << std::endl;
-		std::cout << "  ▹ crossover rate = " << GAGA_COLOR_BLUE << crossoverRate
+		std::cout << "  - crossover rate = " << GAGA_COLOR_BLUE << crossoverRate
 		          << GAGA_COLOR_NORMAL << std::endl;
-		std::cout << "  ▹ writing results in " << GAGA_COLOR_BLUE << folder
+		std::cout << "  - writing results in " << GAGA_COLOR_BLUE << folder
 		          << GAGA_COLOR_NORMAL << std::endl;
-		for (int i = 0; i < nbCol - 1; ++i) std::cout << "━";
+		for (int i = 0; i < nbCol - 1; ++i) std::cout << lineChar;
 		std::cout << std::endl;
 		for (auto &f : printStart_hooks) f(*this);
 		std::cout << GAGA_COLOR_GREY;
-		for (int i = 0; i < nbCol - 1; ++i) std::cout << "━";
+		for (int i = 0; i < nbCol - 1; ++i) std::cout << lineChar;
 		std::cout << GAGA_COLOR_NORMAL << std::endl;
 	}
 	void updateStats(double totalTime) {
@@ -1022,8 +1047,8 @@ template <typename DNA, typename Ind = Individual<DNA>> class GA {
 		for (const auto &o : genStats[n]) {
 			if (o.first != "global" && o.first != "custom") {
 				output = std::ostringstream();
-				output << GAGA_COLOR_GREYBOLD << "--◇" << GAGA_COLOR_GREENBOLD << std::setw(10)
-				       << o.first << GAGA_COLOR_GREYBOLD << " ❯ " << GAGA_COLOR_NORMAL
+				output << GAGA_COLOR_GREYBOLD << "-- " << GAGA_COLOR_GREENBOLD << std::setw(10)
+				       << o.first << GAGA_COLOR_GREYBOLD << " -> " << GAGA_COLOR_NORMAL
 				       << " worst: " << GAGA_COLOR_YELLOW << std::setw(12) << o.second.at("worst")
 				       << GAGA_COLOR_NORMAL << ", avg: " << GAGA_COLOR_YELLOWBOLD << std::setw(12)
 				       << o.second.at("avg") << GAGA_COLOR_NORMAL
@@ -1042,7 +1067,7 @@ template <typename DNA, typename Ind = Individual<DNA>> class GA {
 			for (const auto &o : genStats[n]["custom"]) {
 				output = std::ostringstream();
 				output << GAGA_COLOR_GREENBOLD << std::setw(15) << o.first << GAGA_COLOR_GREYBOLD
-				       << " ❯ " << GAGA_COLOR_NORMAL << std::setw(15) << o.second;
+				       << " -> " << GAGA_COLOR_NORMAL << std::setw(15) << o.second;
 				std::cout << tableCenteredText(
 				    l, output.str(), GAGA_COLOR_GREENBOLD GAGA_COLOR_GREYBOLD GAGA_COLOR_NORMAL);
 			}
@@ -1075,17 +1100,29 @@ template <typename DNA, typename Ind = Individual<DNA>> class GA {
 	    std::string
 	    tableHeader(unsigned int l) {
 		std::ostringstream output;
+#ifndef GAGA_UTF8_DEBUG_PRINT_DISABLED
 		output << "┌";
 		for (auto i = 0u; i < l; ++i) output << "─";
 		output << "┓\n";
+#else
+		output << "+";
+		for (auto i = 0u; i < l; ++i) output << "-";
+		output << "+\n";
+#endif
 		return output.str();
 	}
 
 	std::string tableFooter(unsigned int l) {
 		std::ostringstream output;
+#ifndef GAGA_UTF8_DEBUG_PRINT_DISABLED
 		output << "┗";
 		for (auto i = 0u; i < l; ++i) output << "─";
 		output << "┛\n";
+#else
+		output << "+";
+		for (auto i = 0u; i < l; ++i) output << "-";
+		output << "+\n";
+#endif
 		return output.str();
 	}
 
