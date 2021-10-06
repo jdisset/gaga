@@ -1,5 +1,5 @@
 // Gaga: lightweight simple genetic algorithm library
-// Copyright (c) Jean Disset 2019, All rights reserved.
+// Copyright (c) Jean Disset 2021, All rights reserved.
 
 // This library is free software; you can redistribute it and/or
 //
